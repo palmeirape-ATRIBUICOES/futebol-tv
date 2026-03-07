@@ -31,7 +31,11 @@
             <!-- HEADER -->
             <div class="admin-header">
                 <h1 class="admin-title">⚙️ Painel Administrativo</h1>
-                <button class="btn btn-primary" onclick="toggleForm()">+ Adicionar Canal</button>
+                <div style="display:flex;gap:12px;flex-wrap:wrap">
+                    <button class="btn btn-primary" onclick="toggleForm()">+ Adicionar Canal</button>
+                    <button class="btn btn-gold" onclick="toggleM3uImport()">📥 Importar Lista M3U</button>
+                    <button class="btn btn-danger" onclick="deleteAllChannels()">🗑️ Limpar Tudo</button>
+                </div>
             </div>
 
             <!-- STATS -->
@@ -116,6 +120,34 @@
                 </form>
             </div>
 
+            <!-- M3U IMPORT PANEL -->
+            <div class="admin-form" id="m3uImportPanel" style="display:none">
+                <h3>📥 Importar Lista M3U</h3>
+                <p style="color:var(--text-secondary);margin-bottom:16px;font-size:.9rem">
+                    Cole sua lista M3U/M3U8 completa no campo abaixo. O sistema vai identificar os canais
+                    automaticamente.
+                    <br>Formato aceito: <code
+                        style="background:var(--surface);padding:2px 6px;border-radius:4px">#EXTINF</code> seguido da
+                    URL.
+                </p>
+                <div class="form-group">
+                    <label>Lista M3U</label>
+                    <textarea id="m3uTextarea" rows="10" placeholder="#EXTM3U
+#EXTINF:-1 tvg-name=&quot;Flamengo x Palmeiras&quot; group-title=&quot;Brasileirão&quot;,Flamengo x Palmeiras
+https://stream.example.com/live.m3u8
+#EXTINF:-1 tvg-name=&quot;Real Madrid x Barcelona&quot; group-title=&quot;La Liga&quot;,Real Madrid x Barcelona
+https://stream2.example.com/live.m3u8
+
+Ou cole apenas URLs (uma por linha):
+https://stream.example.com/canal1.m3u8
+https://stream.example.com/canal2.m3u8" style="resize:vertical;min-height:200px"></textarea>
+                </div>
+                <div style="display:flex;gap:12px;margin-top:16px">
+                    <button class="btn btn-primary" onclick="importM3u()">📥 Importar Canais</button>
+                    <button class="btn btn-secondary" onclick="toggleM3uImport()">Cancelar</button>
+                </div>
+            </div>
+
             <!-- CHANNELS TABLE -->
             <div class="channels-table" id="channelsTable">
                 <div class="channels-table-header">
@@ -161,9 +193,68 @@
         </div>
     </footer>
 
+    <!-- LOGIN MODAL (para admin) -->
+    <div class="modal-overlay" id="adminLoginModal">
+        <div class="modal" style="position:relative">
+            <h2>🔐 Admin Login</h2>
+            <p class="modal-sub">Faça login para acessar o painel</p>
+            <div class="modal-error" id="adminLoginError"></div>
+            <form onsubmit="handleAdminLogin(event)">
+                <div class="form-group"><label>E-mail</label><input type="email" id="adminEmail"
+                        placeholder="admin@email.com" required></div>
+                <div class="form-group"><label>Senha</label><input type="password" id="adminPassword"
+                        placeholder="••••••••" required></div>
+                <button type="submit" class="btn btn-primary" id="adminLoginBtn">Entrar</button>
+            </form>
+            <p class="modal-link" style="margin-top:16px">
+                Não tem conta? <a href="#" onclick="event.preventDefault();handleAdminRegister()">Criar conta admin</a>
+            </p>
+        </div>
+    </div>
+
     <script src="firebase-config.js"></script>
     <script src="auth.js"></script>
     <script src="admin.js"></script>
+    <script>
+        // Show login if not authenticated
+        auth.onAuthStateChanged(user => {
+            if (!user) {
+                document.getElementById('adminLoginModal').classList.add('active');
+            } else {
+                document.getElementById('adminLoginModal').classList.remove('active');
+            }
+        });
+
+        async function handleAdminLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById('adminLoginBtn');
+            const err = document.getElementById('adminLoginError');
+            btn.textContent = 'Entrando...'; btn.disabled = true; err.style.display = 'none';
+
+            const result = await AuthModule.login(
+                document.getElementById('adminEmail').value,
+                document.getElementById('adminPassword').value
+            );
+
+            btn.textContent = 'Entrar'; btn.disabled = false;
+            if (!result.success) { err.textContent = result.error; err.style.display = ''; }
+        }
+
+        async function handleAdminRegister() {
+            const email = prompt('Digite seu e-mail:');
+            if (!email) return;
+            const password = prompt('Digite uma senha (mínimo 6 caracteres):');
+            if (!password) return;
+            const name = prompt('Digite seu nome:');
+
+            const result = await AuthModule.register(email, password, { name: name || 'Admin' });
+            if (result.success) {
+                alert('✅ Conta criada! Você será promovido a admin automaticamente.');
+            } else {
+                alert('❌ Erro: ' + result.error);
+            }
+        }
+    </script>
 </body>
 
 </html>

@@ -1,12 +1,24 @@
 // ===== ADMIN — FUTEBOL TV =====
 
-// Check admin auth
-AuthModule.onLogin = (user, data) => {
-    if (data.role !== 'admin') {
-        alert('❌ Acesso negado. Apenas administradores podem acessar esta página.');
-        window.location.href = 'index.html';
-        return;
+// ===== ADMIN SETUP =====
+// Se nenhum admin existe, o primeiro login vira admin automaticamente
+AuthModule.onLogin = async (user, data) => {
+    // Primeiro acesso: se role não está definida, promove a admin
+    if (!data.role || data.role === 'user') {
+        // Verifica se já existe algum admin
+        const admins = await db.collection('users').where('role', '==', 'admin').get();
+        if (admins.empty) {
+            // Nenhum admin existe → promove este usuário
+            await db.collection('users').doc(user.uid).update({ role: 'admin' });
+            data.role = 'admin';
+            console.log('✅ Primeiro admin configurado:', user.email);
+        } else {
+            alert('❌ Acesso negado. Apenas administradores podem acessar esta página.');
+            window.location.href = 'index.html';
+            return;
+        }
     }
+
     document.getElementById('adminUser').textContent = '👤 ' + (data.name || user.email);
     loadChannels();
     loadStats();
@@ -72,9 +84,110 @@ async function saveChannel(e) {
         alert(editId ? '✅ Canal atualizado!' : '✅ Canal adicionado!');
         toggleForm();
         loadChannels();
+        loadStats();
     } catch (err) {
         alert('❌ Erro ao salvar: ' + err.message);
     }
+}
+
+// ===== IMPORTAR LISTA M3U =====
+function toggleM3uImport() {
+    const panel = document.getElementById('m3uImportPanel');
+    panel.style.display = panel.style.display === 'none' ? '' : 'none';
+}
+
+async function importM3u() {
+    const raw = document.getElementById('m3uTextarea').value.trim();
+    if (!raw) { alert('Cole a lista M3U no campo acima.'); return; }
+
+    const channels = parseM3u(raw);
+    if (channels.length === 0) {
+        alert('❌ Nenhum canal encontrado na lista. Verifique o formato M3U.');
+        return;
+    }
+
+    const btn = document.querySelector('#m3uImportPanel .btn-primary');
+    btn.textContent = `Importando ${channels.length} canais...`;
+    btn.disabled = true;
+
+    let imported = 0;
+    for (const ch of channels) {
+        try {
+            await DataModule.saveChannel(ch, null);
+            imported++;
+        } catch (err) {
+            console.error('Erro importando canal:', ch.home, err);
+        }
+    }
+
+    btn.textContent = '📥 Importar Canais';
+    btn.disabled = false;
+    document.getElementById('m3uTextarea').value = '';
+    toggleM3uImport();
+    loadChannels();
+    loadStats();
+    alert(`✅ ${imported} de ${channels.length} canais importados com sucesso!`);
+}
+
+function parseM3u(text) {
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+    const channels = [];
+    let currentInfo = null;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        if (line.startsWith('#EXTINF:')) {
+            // Parse #EXTINF line
+            // Format: #EXTINF:-1 tvg-id="" tvg-name="..." tvg-logo="..." group-title="...",Channel Name
+            const nameMatch = line.match(/,(.+)$/);
+            const groupMatch = line.match(/group-title="([^"]*)"/);
+            const logoMatch = line.match(/tvg-logo="([^"]*)"/);
+
+            currentInfo = {
+                name: nameMatch ? nameMatch[1].trim() : 'Canal ' + (channels.length + 1),
+                group: groupMatch ? groupMatch[1] : '',
+                logo: logoMatch ? logoMatch[1] : ''
+            };
+        } else if (line.startsWith('http') && currentInfo) {
+            // This is the URL line
+            const nameParts = currentInfo.name.split(/\s*x\s*|\s*vs\s*|\s*×\s*/i);
+            const home = nameParts[0] ? nameParts[0].trim() : currentInfo.name;
+            const away = nameParts[1] ? nameParts[1].trim() : '';
+
+            channels.push({
+                home: home,
+                away: away || 'Transmissão',
+                league: currentInfo.group || 'Ao Vivo',
+                url: line,
+                scoreHome: 0,
+                scoreAway: 0,
+                time: 'Ao Vivo',
+                status: 'live',
+                thumb: currentInfo.logo || '',
+                emojiHome: '⚽',
+                emojiAway: '⚽'
+            });
+            currentInfo = null;
+        } else if (line.startsWith('http') && !currentInfo) {
+            // URL without #EXTINF - create basic channel
+            channels.push({
+                home: 'Canal ' + (channels.length + 1),
+                away: 'Transmissão',
+                league: 'Ao Vivo',
+                url: line,
+                scoreHome: 0,
+                scoreAway: 0,
+                time: 'Ao Vivo',
+                status: 'live',
+                thumb: '',
+                emojiHome: '📺',
+                emojiAway: '⚽'
+            });
+        }
+    }
+
+    return channels;
 }
 
 // ===== LOAD CHANNELS =====
@@ -91,7 +204,7 @@ function renderChannelRows(channels) {
     const list = document.getElementById('channelsList');
 
     if (channels.length === 0) {
-        list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)"><p>Nenhum canal cadastrado.</p></div>';
+        list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)"><p>Nenhum canal cadastrado. Clique em "+ Adicionar Canal" ou "📥 Importar M3U".</p></div>';
         return;
     }
 
@@ -150,8 +263,25 @@ async function deleteChannel(id) {
         await DataModule.deleteChannel(id);
         alert('🗑️ Canal excluído!');
         loadChannels();
+        loadStats();
     } catch (err) {
         alert('Erro ao excluir: ' + err.message);
+    }
+}
+
+// ===== DELETE ALL =====
+async function deleteAllChannels() {
+    if (!confirm('⚠️ ATENÇÃO: Isso vai excluir TODOS os canais. Tem certeza?')) return;
+    try {
+        const channels = await DataModule.getChannels();
+        for (const ch of channels) {
+            await DataModule.deleteChannel(ch.id);
+        }
+        alert('🗑️ Todos os canais foram excluídos!');
+        loadChannels();
+        loadStats();
+    } catch (err) {
+        alert('Erro: ' + err.message);
     }
 }
 
