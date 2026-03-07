@@ -102,6 +102,88 @@ function renderMatches(channels) {
 }
 
 // ===== HLS PLAYER =====
+function showPlayerError(msg) {
+    let errDiv = document.getElementById('playerError');
+    if (!errDiv) {
+        errDiv = document.createElement('div');
+        errDiv.id = 'playerError';
+        errDiv.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:20;background:rgba(0,0,0,0.85);border:1px solid rgba(255,59,48,0.4);border-radius:16px;padding:32px 40px;text-align:center;max-width:400px;backdrop-filter:blur(10px)';
+        const container = document.getElementById('videoPlayer').parentElement;
+        container.style.position = 'relative';
+        container.appendChild(errDiv);
+    }
+    errDiv.innerHTML = `
+        <div style="font-size:3rem;margin-bottom:12px">📡</div>
+        <h3 style="color:#ff3b30;margin-bottom:8px;font-size:1.1rem">Stream Indisponivel</h3>
+        <p style="color:rgba(255,255,255,0.6);font-size:.85rem;line-height:1.5;margin-bottom:16px">${msg}</p>
+        <button onclick="retryStream()" style="background:linear-gradient(135deg,#00e676,#00c853);color:#000;border:none;padding:10px 24px;border-radius:8px;font-weight:700;cursor:pointer;margin-right:8px">Tentar Novamente</button>
+        <button onclick="closePlayer()" style="background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:10px 24px;border-radius:8px;cursor:pointer">Voltar</button>
+    `;
+    errDiv.style.display = 'block';
+}
+
+function hidePlayerError() {
+    const errDiv = document.getElementById('playerError');
+    if (errDiv) errDiv.style.display = 'none';
+}
+
+function retryStream() {
+    if (currentChannelUrl) {
+        hidePlayerError();
+        loadHlsStream(currentChannelUrl);
+    }
+}
+
+function loadHlsStream(url) {
+    const video = document.getElementById('videoPlayer');
+    hidePlayerError();
+
+    if (Hls.isSupported() && url) {
+        if (hlsPlayer) hlsPlayer.destroy();
+        hlsPlayer = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            xhrSetup: function (xhr) {
+                xhr.timeout = 10000;
+            }
+        });
+
+        hlsPlayer.loadSource(url);
+        hlsPlayer.attachMedia(video);
+
+        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.play().catch(() => { });
+        });
+
+        hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
+            if (data.fatal) {
+                switch (data.type) {
+                    case Hls.ErrorTypes.NETWORK_ERROR:
+                        showPlayerError('Erro de rede. O stream pode estar offline ou bloqueado por CORS. Verifique a URL no painel admin.');
+                        hlsPlayer.destroy();
+                        break;
+                    case Hls.ErrorTypes.MEDIA_ERROR:
+                        console.warn('Erro de midia, tentando recuperar...');
+                        hlsPlayer.recoverMediaError();
+                        break;
+                    default:
+                        showPlayerError('O stream nao pode ser carregado. Tente outro canal.');
+                        hlsPlayer.destroy();
+                        break;
+                }
+            }
+        });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = url;
+        video.addEventListener('error', () => {
+            showPlayerError('Erro ao carregar o stream neste dispositivo.');
+        }, { once: true });
+        video.play().catch(() => { });
+    } else {
+        showPlayerError('Seu navegador nao suporta reproducao HLS.');
+    }
+}
+
 function openPlayer(url, title) {
     // Check if user is premium
     const isPremium = AuthModule.userData && AuthModule.userData.premium;
@@ -111,20 +193,8 @@ function openPlayer(url, title) {
     document.getElementById('playerPage').classList.add('active');
     document.getElementById('paywallOverlay').classList.remove('active');
 
-    // Start video
-    const video = document.getElementById('videoPlayer');
-    if (Hls.isSupported() && url) {
-        if (hlsPlayer) hlsPlayer.destroy();
-        hlsPlayer = new Hls();
-        hlsPlayer.loadSource(url);
-        hlsPlayer.attachMedia(video);
-        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
-            video.play().catch(() => { });
-        });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = url;
-        video.play().catch(() => { });
-    }
+    // Start video with error handling
+    loadHlsStream(url);
 
     // Start paywall timer (only if not premium)
     if (!isPremium) {
