@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Futebol TV — Assista Jogos ao Vivo</title>
+    <meta name="description"
+        content="Assista aos melhores jogos de futebol ao vivo. Transmissões em HD de todos os campeonatos.">
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0a0a0f">
+    <link rel="apple-touch-icon" href="images/icon-192.png">
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <!-- HLS.js Player -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+
+<body>
+    <!-- PRELOADER -->
+    <div id="preloader">
+        <div class="preloader-content">
+            <div class="preloader-icon">⚽</div>
+            <div class="preloader-text">FUTEBOL TV</div>
+            <div class="preloader-bar"></div>
+        </div>
+    </div>
+
+    <!-- NAVBAR -->
+    <nav class="navbar" id="navbar">
+        <div class="container">
+            <a href="index.html" class="navbar-brand">
+                <span class="brand-icon">⚽</span>
+                <span>FUTEBOL TV</span>
+            </a>
+            <div class="nav-links">
+                <a href="#live">Ao Vivo</a>
+                <a href="#schedule">Programação</a>
+            </div>
+            <div class="nav-cta" id="navCta">
+                <a href="#" class="btn btn-secondary" onclick="openLogin()">Entrar</a>
+                <a href="#" class="btn btn-primary" onclick="openRegister()">Assinar</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- HERO -->
+    <section class="hero">
+        <div class="hero-bg"></div>
+        <div class="hero-content">
+            <h1>Todos os jogos<br><span class="highlight">ao vivo</span> na palma da mão</h1>
+            <p>Assista aos melhores campeonatos de futebol em tempo real com qualidade HD.</p>
+            <div class="hero-badges">
+                <span class="badge-live"><span class="dot"></span> AO VIVO AGORA</span>
+                <span class="badge-count" id="matchCount">0 jogos disponíveis</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- MATCHES LIVE -->
+    <section class="section" id="live">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title"><span class="icon">🔴</span> Jogos ao Vivo</h2>
+                <span class="badge-live"><span class="dot"></span> LIVE</span>
+            </div>
+            <div class="matches-grid" id="matchesGrid">
+                <!-- Cards gerados via JS -->
+                <div style="text-align:center;padding:60px 20px;color:var(--text-muted);grid-column:1/-1">
+                    <div style="font-size:3rem;margin-bottom:16px">📡</div>
+                    <p>Carregando jogos disponíveis...</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        <div class="container">
+            <p>⚽ FUTEBOL TV &copy; 2026 — Todos os direitos reservados.</p>
+        </div>
+    </footer>
+
+    <!-- ========== PLAYER PAGE (overlay) ========== -->
+    <div class="player-page" id="playerPage">
+        <div class="player-header">
+            <button class="player-back" onclick="closePlayer()">← Voltar</button>
+            <span class="player-title" id="playerTitle">Carregando...</span>
+            <span class="badge-live"><span class="dot"></span> AO VIVO</span>
+        </div>
+        <div class="player-container">
+            <video id="videoPlayer" autoplay playsinline></video>
+            <!-- Timer bar -->
+            <div class="timer-bar" id="timerBar">
+                <div class="timer-bar-fill" id="timerFill"></div>
+            </div>
+            <div class="timer-badge" id="timerBadge">
+                <span class="timer-icon">⏱</span>
+                <span id="timerText">Grátis: 40s</span>
+            </div>
+
+            <!-- Paywall Overlay -->
+            <div class="paywall-overlay" id="paywallOverlay">
+                <div class="paywall-icon">🔒</div>
+                <h2 class="paywall-title">Tempo grátis <span class="highlight">esgotado!</span></h2>
+                <p class="paywall-desc">Seu período de visualização gratuita acabou. Assine agora para continuar
+                    assistindo todos os jogos ao vivo com qualidade HD.</p>
+                <div class="paywall-price">R$ 14,90</div>
+                <div class="paywall-period">por mês • Cancele quando quiser</div>
+                <ul class="paywall-features">
+                    <li>Todos os jogos ao vivo sem limites</li>
+                    <li>Qualidade HD e Full HD</li>
+                    <li>Acesso em até 3 dispositivos</li>
+                    <li>Sem anúncios durante os jogos</li>
+                    <li>Replays e melhores momentos</li>
+                </ul>
+                <button class="btn btn-gold" onclick="openPayment()" style="font-size:1rem;padding:14px 40px">
+                    💳 Assinar Agora — R$ 14,90/mês
+                </button>
+                <p style="margin-top:16px;color:var(--text-muted);font-size:.8rem">
+                    Ou <a href="#" onclick="openLogin()" style="color:var(--accent-green)">faça login</a> se já é
+                    assinante
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== LOGIN MODAL ========== -->
+    <div class="modal-overlay" id="loginModal">
+        <div class="modal" style="position:relative">
+            <button class="modal-close" onclick="closeLogin()">&times;</button>
+            <h2>⚽ Entrar</h2>
+            <p class="modal-sub">Acesse sua conta para assistir sem limites</p>
+            <div class="modal-error" id="loginError"></div>
+            <form onsubmit="handleLogin(event)">
+                <div class="form-group"><label>E-mail</label><input type="email" id="loginEmail"
+                        placeholder="seu@email.com" required></div>
+                <div class="form-group"><label>Senha</label><input type="password" id="loginPassword"
+                        placeholder="••••••••" required></div>
+                <button type="submit" class="btn btn-primary" id="loginBtn">Entrar</button>
+            </form>
+            <p class="modal-link">Não tem conta? <a href="#"
+                    onclick="event.preventDefault();closeLogin();openRegister()">Cadastre-se</a></p>
+        </div>
+    </div>
+
+    <!-- ========== REGISTER MODAL ========== -->
+    <div class="modal-overlay" id="registerModal">
+        <div class="modal" style="position:relative">
+            <button class="modal-close" onclick="closeRegister()">&times;</button>
+            <h2>⚽ Criar Conta</h2>
+            <p class="modal-sub">Cadastre-se e assista todos os jogos</p>
+            <div class="modal-error" id="registerError"></div>
+            <form onsubmit="handleRegister(event)">
+                <div class="form-group"><label>Nome</label><input type="text" id="regName" placeholder="Seu nome"
+                        required></div>
+                <div class="form-group"><label>E-mail</label><input type="email" id="regEmail"
+                        placeholder="seu@email.com" required></div>
+                <div class="form-group"><label>Senha</label><input type="password" id="regPassword"
+                        placeholder="Mínimo 6 caracteres" required minlength="6"></div>
+                <button type="submit" class="btn btn-primary" id="regBtn">Criar Conta</button>
+            </form>
+            <p class="modal-link">Já tem conta? <a href="#"
+                    onclick="event.preventDefault();closeRegister();openLogin()">Faça login</a></p>
+        </div>
+    </div>
+
+    <script src="firebase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>

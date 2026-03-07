@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin — Futebol TV</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+</head>
+
+<body>
+    <!-- NAVBAR -->
+    <nav class="navbar scrolled">
+        <div class="container">
+            <a href="index.html" class="navbar-brand">
+                <span class="brand-icon">⚽</span>
+                <span>FUTEBOL TV</span>
+            </a>
+            <div class="nav-cta">
+                <span style="color:var(--text-secondary);font-size:.85rem" id="adminUser">👤 Admin</span>
+                <a href="index.html" class="btn btn-secondary">← Voltar</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="admin-page">
+        <div class="container">
+            <!-- HEADER -->
+            <div class="admin-header">
+                <h1 class="admin-title">⚙️ Painel Administrativo</h1>
+                <button class="btn btn-primary" onclick="toggleForm()">+ Adicionar Canal</button>
+            </div>
+
+            <!-- STATS -->
+            <div class="admin-stats">
+                <div class="stat-card">
+                    <div class="stat-label">Canais Ativos</div>
+                    <div class="stat-value green" id="statChannels">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Ao Vivo Agora</div>
+                    <div class="stat-value red" id="statLive">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Assinantes</div>
+                    <div class="stat-value gold" id="statSubs">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Visualizações Hoje</div>
+                    <div class="stat-value" id="statViews">0</div>
+                </div>
+            </div>
+
+            <!-- ADD/EDIT FORM -->
+            <div class="admin-form" id="channelForm" style="display:none">
+                <h3>📡 <span id="formTitle">Adicionar Novo Canal</span></h3>
+                <form onsubmit="saveChannel(event)">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Time Casa</label>
+                            <input type="text" id="chHome" placeholder="Ex: Flamengo" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Time Visitante</label>
+                            <input type="text" id="chAway" placeholder="Ex: Palmeiras" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Campeonato</label>
+                            <input type="text" id="chLeague" placeholder="Ex: Brasileirão Série A">
+                        </div>
+                        <div class="form-group">
+                            <label>URL do Stream (M3U/M3U8)</label>
+                            <input type="url" id="chUrl" placeholder="https://... .m3u8" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Placar Casa</label>
+                            <input type="number" id="chScoreHome" value="0" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Placar Visitante</label>
+                            <input type="number" id="chScoreAway" value="0" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Tempo de Jogo</label>
+                            <input type="text" id="chTime" placeholder="Ex: 35' 1º Tempo">
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select id="chStatus">
+                                <option value="live">🔴 Ao Vivo</option>
+                                <option value="scheduled">📅 Agendado</option>
+                                <option value="ended">⏹ Encerrado</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>URL Thumbnail (opcional)</label>
+                            <input type="url" id="chThumb" placeholder="https://... imagem do jogo">
+                        </div>
+                        <div class="form-group">
+                            <label>Emoji Casa</label>
+                            <input type="text" id="chEmojiHome" placeholder="🔴" maxlength="4">
+                        </div>
+                        <div class="form-group">
+                            <label>Emoji Visitante</label>
+                            <input type="text" id="chEmojiAway" placeholder="🟢" maxlength="4">
+                        </div>
+                    </div>
+                    <input type="hidden" id="chEditId" value="">
+                    <div style="display:flex;gap:12px;margin-top:20px">
+                        <button type="submit" class="btn btn-primary">💾 Salvar Canal</button>
+                        <button type="button" class="btn btn-secondary" onclick="toggleForm()">Cancelar</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- CHANNELS TABLE -->
+            <div class="channels-table" id="channelsTable">
+                <div class="channels-table-header">
+                    <span>Status</span>
+                    <span>Jogo</span>
+                    <span>Campeonato</span>
+                    <span>Placar</span>
+                    <span>Tempo</span>
+                    <span>Ações</span>
+                </div>
+                <div id="channelsList">
+                    <div style="text-align:center;padding:40px;color:var(--text-muted);grid-column:1/-1">
+                        <p>Nenhum canal cadastrado. Clique em "+ Adicionar Canal" para começar.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SUBSCRIBERS TABLE -->
+            <div style="margin-top:32px">
+                <h3 style="font-size:1.2rem;font-weight:700;margin-bottom:16px">👥 Assinantes Recentes</h3>
+                <div class="channels-table">
+                    <div class="channels-table-header" style="grid-template-columns:2fr 2fr 1fr 1fr 1fr 100px">
+                        <span>Nome</span>
+                        <span>E-mail</span>
+                        <span>Status</span>
+                        <span>Plano</span>
+                        <span>Desde</span>
+                        <span>Ações</span>
+                    </div>
+                    <div id="subscribersList">
+                        <div style="text-align:center;padding:40px;color:var(--text-muted)">
+                            <p>Nenhum assinante ainda.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="footer" style="margin-top:60px">
+        <div class="container">
+            <p>⚽ FUTEBOL TV Admin &copy; 2026</p>
+        </div>
+    </footer>
+
+    <script src="firebase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="admin.js"></script>
+</body>
+
+</html>
