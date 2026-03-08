@@ -222,7 +222,7 @@ function renderMatches(channels) {
             const logoHome = getTeamLogo(ch.home);
             const logoAway = getTeamLogo(ch.away);
 
-            html += '<div class="match-item ' + statusClass + '" onclick="openPlayer(\'' + (ch.url || '') + '\', \'' + ch.home + ' x ' + ch.away + '\')">';
+            html += '<div class="match-item ' + statusClass + '" onclick="openPlayer(\'' + (ch.url || '') + '\', \'' + ch.home + ' x ' + ch.away + '\', \'' + (ch.streamPageUrl || '') + '\')">';
             html += '  <div class="match-item-left">';
             html += '    <div class="match-item-teams">';
             html += '      <img class="team-logo" src="' + logoHome + '" alt="' + ch.home + '" onerror="this.src=\'https://cdn-icons-png.flaticon.com/128/1165/1165187.png\'">';
@@ -366,7 +366,7 @@ function loadHlsStream(url) {
     }
 }
 
-function openPlayer(url, title) {
+function openPlayer(url, title, streamPageUrl) {
     const isPremium = AuthModule.userData && AuthModule.userData.premium;
     currentChannelUrl = url;
     document.getElementById('playerTitle').textContent = title;
@@ -377,7 +377,33 @@ function openPlayer(url, title) {
     // Update play button state
     updatePlayPauseBtn(true);
 
-    loadHlsStream(url);
+    // Remove any existing iframe
+    const existingIframe = document.getElementById('streamIframe');
+    if (existingIframe) existingIframe.remove();
+
+    const video = document.getElementById('videoPlayer');
+
+    if (url && url.includes('.m3u8')) {
+        // Direct M3U8 stream
+        video.style.display = '';
+        loadHlsStream(url);
+    } else if (streamPageUrl) {
+        // Fallback: load original game page in iframe
+        video.style.display = 'none';
+        hidePlayerError();
+        const iframe = document.createElement('iframe');
+        iframe.id = 'streamIframe';
+        iframe.src = streamPageUrl;
+        iframe.style.cssText = 'width:100%;height:100%;border:none;position:absolute;top:0;left:0;z-index:5;background:#000;';
+        iframe.allowFullscreen = true;
+        iframe.setAttribute('allow', 'autoplay; fullscreen; encrypted-media');
+        video.parentElement.appendChild(iframe);
+    } else if (url) {
+        video.style.display = '';
+        loadHlsStream(url);
+    } else {
+        showPlayerError('Nenhum stream disponível para este jogo no momento.');
+    }
 
     // Timer
     if (!isPremium) {
@@ -398,7 +424,13 @@ function closePlayer() {
     document.body.style.overflow = '';
     const video = document.getElementById('videoPlayer');
     video.pause();
+    video.style.display = '';
     if (hlsPlayer) { hlsPlayer.destroy(); hlsPlayer = null; }
+
+    // Remove iframe if exists
+    const iframe = document.getElementById('streamIframe');
+    if (iframe) iframe.remove();
+
     clearInterval(paywallTimer);
     paywallTimer = null;
     timeLeft = FREE_TIME;
