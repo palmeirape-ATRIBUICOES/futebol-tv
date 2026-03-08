@@ -341,3 +341,295 @@ async function revokeAccess(uid) {
         alert('Erro: ' + err.message);
     }
 }
+
+// ===== AUTO-SYNC FROM SOURCE SITE =====
+const SOURCE_URL = 'https://howtoblogging.info/?st=index';
+const CORS_PROXIES = [
+    'https://api.allorigins.win/raw?url=',
+    'https://corsproxy.io/?',
+    'https://api.codetabs.com/v1/proxy?quest='
+];
+let autoSyncInterval = null;
+let syncInProgress = false;
+
+function updateSyncUI(status, icon) {
+    const statusEl = document.getElementById('syncStatus');
+    const iconEl = document.getElementById('syncIcon');
+    if (statusEl) statusEl.textContent = status;
+    if (iconEl) iconEl.textContent = icon || '📡';
+}
+
+function updateLastSyncTime() {
+    const el = document.getElementById('lastSyncTime');
+    if (el) {
+        const now = new Date();
+        el.textContent = 'Ultima sync: ' + now.toLocaleTimeString('pt-BR');
+    }
+}
+
+async function fetchWithProxy(url) {
+    for (let i = 0; i < CORS_PROXIES.length; i++) {
+        try {
+            const proxyUrl = CORS_PROXIES[i] + encodeURIComponent(url);
+            const response = await fetch(proxyUrl, {
+                signal: AbortSignal.timeout(15000)
+            });
+            if (response.ok) {
+                return await response.text();
+            }
+        } catch (e) {
+            console.warn('Proxy ' + i + ' falhou:', e.message);
+        }
+    }
+    throw new Error('Todos os proxies falharam. Tente novamente.');
+}
+
+function parseGamesFromHtml(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const games = [];
+
+    // The reference site uses anchor tags with specific structure
+    // Each game link contains: team names, league, time
+    const links = doc.querySelectorAll('a[href*="howtoblogging"], a[href*="?id="]');
+
+    links.forEach(link => {
+        const text = link.textContent.trim();
+        if (!text || text.length < 5) return;
+
+        // Clean up the text - remove dots and extra whitespace
+        const cleanText = text.replace(/\.\s*\.\s*\./g, '').replace(/\s+/g, ' ').trim();
+
+        // Try to extract team and league info
+        // Pattern: "TeamA  League  Time  TeamB"
+        const parts = cleanText.split(/\s{2,}/);
+
+        if (parts.length >= 3) {
+            const home = parts[0].trim();
+            const away = parts[parts.length - 1].trim();
+
+            // Middle parts contain league and time
+            let league = '';
+            let matchTime = '';
+
+            for (let i = 1; i < parts.length - 1; i++) {
+                const part = parts[i].trim();
+                // Check if it looks like a time (HH:MM format)
+                if (/^\d{1,2}:\d{2}$/.test(part)) {
+                    matchTime = part;
+                } else if (part.length > 2) {
+                    league = part;
+                }
+            }
+
+            if (home && away && home !== away && home.length > 1 && away.length > 1) {
+                // Get the link URL (stream link)
+                let streamUrl = link.href || '';
+
+                games.push({
+                    home: home,
+                    away: away,
+                    league: league || 'Campeonato',
+                    matchTime: matchTime || '',
+                    matchDate: new Date().toISOString().split('T')[0],
+                    status: 'live',
+                    streamPageUrl: streamUrl,
+                    url: '', // Will need to be set manually or from stream page
+                    scoreHome: 0,
+                    scoreAway: 0,
+                    time: matchTime ? matchTime : 'Ao Vivo',
+                    emojiHome: getTeamEmoji(home),
+                    emojiAway: getTeamEmoji(away),
+                    viewers: Math.floor(Math.random() * 20000) + 1000,
+                    syncedAt: new Date().toISOString()
+                });
+            }
+        }
+    });
+
+    // If link-based parsing didn't work well, try text-based parsing
+    if (games.length === 0) {
+        const bodyText = doc.body ? doc.body.innerHTML : html;
+
+        // Look for patterns that match team names with times
+        const timePattern = /(\d{1,2}:\d{2})/g;
+        const allText = doc.body ? doc.body.textContent : '';
+        const lines = allText.split('\n').map(l => l.trim()).filter(l => l.length > 3);
+
+        let currentLeague = '';
+        let currentTime = '';
+        let teams = [];
+
+        for (const line of lines) {
+            // Skip junk lines
+            if (line.includes('Baixar') || line.includes('Atualizar') || line.includes('http') || line.length > 100) continue;
+
+            // Check for time
+            const timeMatch = line.match(/^(\d{1,2}:\d{2})$/);
+            if (timeMatch) {
+                currentTime = timeMatch[1];
+                continue;
+            }
+
+            // Check for league-like strings
+            if (line.match(/^(Copa|Campeonato|Brasileiro|Serie|Premier|La Liga|Libertadores|Champions|Paulista|Carioca|Goiano|Baiano|Italiano|Espanhol|Frances|Alemao)/i) ||
+                line.match(/(League|Cup|Liga|Serie|Division)/i)) {
+                currentLeague = line;
+                continue;
+            }
+
+            // Check if it looks like a team name (no numbers, reasonable length)
+            if (line.length > 2 && line.length < 40 && !line.match(/^\d/) && !line.match(/^\./)) {
+                teams.push(line);
+
+                // If we have a pair of teams
+                if (teams.length === 2) {
+                    games.push({
+                        home: teams[0],
+                        away: teams[1],
+                        league: currentLeague || 'Campeonato',
+                        matchTime: currentTime || '',
+                        matchDate: new Date().toISOString().split('T')[0],
+                        status: 'live',
+                        streamPageUrl: '',
+                        url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', // fallback
+                        scoreHome: 0,
+                        scoreAway: 0,
+                        time: currentTime || 'Ao Vivo',
+                        emojiHome: getTeamEmoji(teams[0]),
+                        emojiAway: getTeamEmoji(teams[1]),
+                        viewers: Math.floor(Math.random() * 20000) + 1000,
+                        syncedAt: new Date().toISOString()
+                    });
+                    teams = [];
+                    currentTime = '';
+                }
+            }
+        }
+    }
+
+    return games;
+}
+
+function getTeamEmoji(team) {
+    const name = team.toLowerCase();
+    // Brazilian teams
+    if (name.includes('flamengo') || name.includes('internacional') || name.includes('inter')) return '🔴';
+    if (name.includes('palmeiras') || name.includes('goias')) return '🟢';
+    if (name.includes('corinthians') || name.includes('botafogo') || name.includes('vasco')) return '⚫';
+    if (name.includes('gremio') || name.includes('cruzeiro')) return '🔵';
+    if (name.includes('sao paulo') || name.includes('santos')) return '⚪';
+    if (name.includes('fluminense')) return '🟤';
+    if (name.includes('bahia') || name.includes('vitoria')) return '🔴';
+    if (name.includes('atletico')) return '⚫';
+    if (name.includes('bangu')) return '🔴';
+    // European
+    if (name.includes('real madrid') || name.includes('juventus')) return '⚪';
+    if (name.includes('barcelona') || name.includes('chelsea')) return '🔵';
+    if (name.includes('manchester city') || name.includes('city')) return '🔵';
+    if (name.includes('liverpool') || name.includes('milan') || name.includes('arsenal')) return '🔴';
+    if (name.includes('newcastle') || name.includes('pisa')) return '⚫';
+    if (name.includes('athletic')) return '🔴';
+    if (name.includes('wrexham')) return '🔴';
+    return '⚽';
+}
+
+async function syncFromSource() {
+    if (syncInProgress) {
+        alert('Sincronizacao em andamento. Aguarde...');
+        return;
+    }
+
+    syncInProgress = true;
+    const btn = document.getElementById('btnSync');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Sincronizando...';
+    }
+    updateSyncUI('Buscando jogos...', '⏳');
+
+    try {
+        // 1. Fetch the source page
+        const html = await fetchWithProxy(SOURCE_URL);
+        updateSyncUI('Analisando pagina...', '🔍');
+
+        // 2. Parse games
+        const games = parseGamesFromHtml(html);
+
+        if (games.length === 0) {
+            updateSyncUI('Nenhum jogo encontrado', '⚠️');
+            alert('Nenhum jogo foi encontrado no site fonte. O site pode ter mudado de estrutura.');
+            return;
+        }
+
+        updateSyncUI('Salvando ' + games.length + ' jogos...', '💾');
+
+        // 3. Clear old synced channels (only auto-synced ones, keep manual ones)
+        const existingChannels = await db.collection('channels').where('syncedAt', '!=', '').get();
+        const deletePromises = [];
+        existingChannels.forEach(doc => {
+            deletePromises.push(doc.ref.delete());
+        });
+        await Promise.all(deletePromises);
+
+        // 4. Save new games
+        const savePromises = games.map(game => {
+            return db.collection('channels').add({
+                ...game,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        });
+        await Promise.all(savePromises);
+
+        updateSyncUI('✅ ' + games.length + ' jogos sincronizados!', '✅');
+        updateLastSyncTime();
+        loadChannels();
+        loadStats();
+
+        console.log('Sync completa:', games.length, 'jogos');
+
+    } catch (err) {
+        console.error('Erro na sincronizacao:', err);
+        updateSyncUI('Erro: ' + err.message, '❌');
+        alert('Erro na sincronizacao: ' + err.message + '\n\nTente novamente em alguns instantes.');
+    } finally {
+        syncInProgress = false;
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '🔄 Sincronizar Jogos';
+        }
+    }
+}
+
+function toggleAutoSync() {
+    const toggle = document.getElementById('autoSyncToggle');
+
+    if (toggle && toggle.checked) {
+        // Start auto-sync every 30 minutes
+        updateSyncUI('Ativa — proxima sync em 30 min', '🟢');
+
+        // Do first sync immediately
+        syncFromSource();
+
+        // Set interval for every 30 minutes (1800000 ms)
+        autoSyncInterval = setInterval(() => {
+            console.log('Auto-sync disparada:', new Date().toLocaleTimeString());
+            syncFromSource();
+        }, 30 * 60 * 1000); // 30 minutes
+
+    } else {
+        // Stop auto-sync
+        if (autoSyncInterval) {
+            clearInterval(autoSyncInterval);
+            autoSyncInterval = null;
+        }
+        updateSyncUI('Desativada', '📡');
+    }
+}
+
+// Restore auto-sync state if page was left open
+window.addEventListener('beforeunload', () => {
+    if (autoSyncInterval) {
+        clearInterval(autoSyncInterval);
+    }
+});

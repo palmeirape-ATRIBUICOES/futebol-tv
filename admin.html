@@ -30,11 +30,34 @@
         <div class="container">
             <!-- HEADER -->
             <div class="admin-header">
-                <h1 class="admin-title">⚙️ Painel Administrativo</h1>
+                <h1 class="admin-title">&#9881;&#65039; Painel Administrativo</h1>
                 <div style="display:flex;gap:12px;flex-wrap:wrap">
                     <button class="btn btn-primary" onclick="toggleForm()">+ Adicionar Canal</button>
-                    <button class="btn btn-gold" onclick="toggleM3uImport()">📥 Importar Lista M3U</button>
-                    <button class="btn btn-danger" onclick="deleteAllChannels()">🗑️ Limpar Tudo</button>
+                    <button class="btn btn-gold" onclick="toggleM3uImport()">&#128229; Importar Lista M3U</button>
+                    <button class="btn btn-secondary" onclick="syncFromSource()" id="btnSync"
+                        style="background:linear-gradient(135deg,rgba(68,138,255,.15),rgba(0,230,118,.15));border-color:rgba(68,138,255,.3);color:#448aff">&#128260;
+                        Sincronizar Jogos</button>
+                    <button class="btn btn-danger" onclick="deleteAllChannels()">&#128465;&#65039; Limpar Tudo</button>
+                </div>
+            </div>
+
+            <!-- AUTO-SYNC STATUS -->
+            <div id="syncPanel"
+                style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+                <div style="display:flex;align-items:center;gap:12px">
+                    <span style="font-size:1.5rem" id="syncIcon">&#128225;</span>
+                    <div>
+                        <div style="font-weight:700;font-size:.9rem">Sincronizacao Automatica</div>
+                        <div style="color:var(--text-muted);font-size:.78rem" id="syncStatus">Desativada</div>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px">
+                    <span style="font-size:.78rem;color:var(--text-muted)" id="lastSyncTime">Nunca sincronizado</span>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                        <input type="checkbox" id="autoSyncToggle" onchange="toggleAutoSync()"
+                            style="width:18px;height:18px;accent-color:var(--accent-green)">
+                        <span style="font-size:.85rem;font-weight:600">Auto (30 min)</span>
+                    </label>
                 </div>
             </div>
 
