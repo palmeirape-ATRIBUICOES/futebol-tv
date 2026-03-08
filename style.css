@@ -1187,14 +1187,18 @@ button {
 }
 
 .team-logo {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
+    max-width: 32px;
+    max-height: 32px;
+    min-width: 32px;
+    min-height: 32px;
     border-radius: 50%;
     object-fit: contain;
     flex-shrink: 0;
     background: rgba(255, 255, 255, .06);
-    padding: 3px;
-    border: 1px solid rgba(255, 255, 255, .08);
+    padding: 2px;
+    border: 1px solid rgba(255, 255, 255, .1);
     box-shadow: 0 2px 8px rgba(0, 0, 0, .2);
 }
 
