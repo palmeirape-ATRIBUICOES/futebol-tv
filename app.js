@@ -26,51 +26,8 @@ let timeLeft = 120;
 const FREE_TIME = 120; // 2 minutes
 let allChannels = [];
 
-// ===== DEMO CHANNELS =====
-const sampleChannels = [
-    {
-        id: 'demo1', home: 'Flamengo', away: 'Palmeiras', league: 'Brasileirao Serie A',
-        scoreHome: 2, scoreAway: 1, time: "67' 2T", status: 'live',
-        emojiHome: '🔴', emojiAway: '🟢', viewers: 12453,
-        matchDate: '2026-03-07', matchTime: '21:30',
-        url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
-    },
-    {
-        id: 'demo2', home: 'Real Madrid', away: 'Barcelona', league: 'La Liga',
-        scoreHome: 1, scoreAway: 1, time: "34' 1T", status: 'live',
-        emojiHome: '⚪', emojiAway: '🔵', viewers: 34210,
-        matchDate: '2026-03-07', matchTime: '17:00',
-        url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
-    },
-    {
-        id: 'demo3', home: 'Corinthians', away: 'Sao Paulo', league: 'Brasileirao Serie A',
-        scoreHome: 0, scoreAway: 0, time: "12' 1T", status: 'live',
-        emojiHome: '⚫', emojiAway: '🔴', viewers: 8721,
-        matchDate: '2026-03-07', matchTime: '19:00',
-        url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
-    },
-    {
-        id: 'demo4', home: 'Manchester City', away: 'Liverpool', league: 'Premier League',
-        scoreHome: 3, scoreAway: 2, time: "89' 2T", status: 'live',
-        emojiHome: '🔵', emojiAway: '🔴', viewers: 45102,
-        matchDate: '2026-03-07', matchTime: '14:30',
-        url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
-    },
-    {
-        id: 'demo5', home: 'Gremio', away: 'Internacional', league: 'Brasileirao Serie A',
-        scoreHome: 1, scoreAway: 0, time: "55' 2T", status: 'live',
-        emojiHome: '🔵', emojiAway: '🔴', viewers: 6534,
-        matchDate: '2026-03-08', matchTime: '16:00',
-        url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
-    },
-    {
-        id: 'demo6', home: 'Juventus', away: 'Milan', league: 'Serie A',
-        scoreHome: 0, scoreAway: 1, time: "22' 1T", status: 'live',
-        emojiHome: '⚪', emojiAway: '🔴', viewers: 15783,
-        matchDate: '2026-03-08', matchTime: '15:45',
-        url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
-    }
-];
+// ===== NO DEMO DATA — ALL DATA COMES FROM FIRESTORE =====
+const sampleChannels = [];
 
 // ===== FORMAT TIME =====
 function formatMatchTime(ch) {
@@ -183,7 +140,9 @@ function renderMatches(channels) {
     const count = document.getElementById('matchCount');
 
     if (!channels || channels.length === 0) {
-        channels = sampleChannels;
+        count.textContent = 'Carregando jogos...';
+        list.innerHTML = '<div style="text-align:center;padding:60px 20px;color:var(--text-muted)"><p style="font-size:1.2rem">⚽ Nenhum jogo disponivel no momento.</p><p>Os jogos sao atualizados a cada 30 minutos.</p></div>';
+        return;
     }
 
     allChannels = channels;
