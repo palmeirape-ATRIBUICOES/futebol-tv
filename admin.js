@@ -386,103 +386,147 @@ async function fetchWithProxy(url) {
 
 function parseGamesFromHtml(html) {
     const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+
+    // CRITICAL: Remove all script and style tags BEFORE parsing
+    let cleanHtml = html.replace(/<script[\s\S]*?<\/script>/gi, '');
+    cleanHtml = cleanHtml.replace(/<style[\s\S]*?<\/style>/gi, '');
+    cleanHtml = cleanHtml.replace(/<noscript[\s\S]*?<\/noscript>/gi, '');
+    cleanHtml = cleanHtml.replace(/<!--[\s\S]*?-->/g, '');
+
+    const doc = parser.parseFromString(cleanHtml, 'text/html');
     const games = [];
 
-    // The reference site uses anchor tags with specific structure
-    // Each game link contains: team names, league, time
+    // Blacklist of junk keywords that are NOT team names
+    const JUNK_KEYWORDS = [
+        'function', 'var ', 'const ', 'let ', 'push', 'getElementById',
+        'display', 'width', 'height', 'margin', 'padding', 'border',
+        'script', 'style', 'googletag', 'adsbygoogle', 'analytics',
+        'Hasync', 'Histats', 'cookie', 'window.', 'document.',
+        'innerHTML', 'className', 'addEventListener', '$.', 'jQuery',
+        '{', '}', '()', '=>', 'return', 'async', 'await', 'import',
+        'console.', 'setTimeout', 'setInterval', 'onclick', 'href=',
+        'src=', 'div.', 'span.', 'px;', 'em;', 'rem;', 'block;',
+        'inline', 'Baixar', 'Atualizar', 'Compartilhar', 'Whatsapp',
+        'APP', 'FUTEBOL DA HORA', 'http', 'www.', '.com', '.net',
+        '.js', '.css', '.php', '.html', 'Copyright', 'Privacy',
+        'Scholarship', 'Australia', 'Tax', 'Finance', 'Insurance',
+        'Google', 'Cloud', 'Blog', 'Article', 'Read more', 'Leia mais'
+    ];
+
+    function isJunk(text) {
+        const lower = text.toLowerCase();
+        return JUNK_KEYWORDS.some(keyword => lower.includes(keyword.toLowerCase()));
+    }
+
+    function isValidTeamName(name) {
+        if (!name || name.length < 2 || name.length > 35) return false;
+        if (isJunk(name)) return false;
+        // Must contain at least one letter
+        if (!/[a-zA-ZÀ-ú]/.test(name)) return false;
+        // Should not be mostly numbers/symbols
+        const letters = name.replace(/[^a-zA-ZÀ-ú]/g, '');
+        if (letters.length < name.length * 0.4) return false;
+        // No code-like characters
+        if (/[{}();=><]/.test(name)) return false;
+        return true;
+    }
+
+    // Strategy 1: Find game links (anchor tags with game data)
     const links = doc.querySelectorAll('a[href*="howtoblogging"], a[href*="?id="]');
 
     links.forEach(link => {
         const text = link.textContent.trim();
-        if (!text || text.length < 5) return;
+        if (!text || text.length < 5 || isJunk(text)) return;
 
-        // Clean up the text - remove dots and extra whitespace
+        // Clean text: remove dots pattern and normalize spaces
         const cleanText = text.replace(/\.\s*\.\s*\./g, '').replace(/\s+/g, ' ').trim();
+        if (cleanText.length < 5 || isJunk(cleanText)) return;
 
-        // Try to extract team and league info
-        // Pattern: "TeamA  League  Time  TeamB"
-        const parts = cleanText.split(/\s{2,}/);
+        // Split by multiple spaces (site uses whitespace to separate fields)
+        const parts = cleanText.split(/\s{2,}/).map(p => p.trim()).filter(p => p.length > 0);
 
         if (parts.length >= 3) {
             const home = parts[0].trim();
             const away = parts[parts.length - 1].trim();
 
-            // Middle parts contain league and time
+            // Validate both team names
+            if (!isValidTeamName(home) || !isValidTeamName(away)) return;
+
             let league = '';
             let matchTime = '';
 
             for (let i = 1; i < parts.length - 1; i++) {
                 const part = parts[i].trim();
-                // Check if it looks like a time (HH:MM format)
                 if (/^\d{1,2}:\d{2}$/.test(part)) {
                     matchTime = part;
-                } else if (part.length > 2) {
+                } else if (part.length > 2 && !isJunk(part)) {
                     league = part;
                 }
             }
 
-            if (home && away && home !== away && home.length > 1 && away.length > 1) {
-                // Get the link URL (stream link)
-                let streamUrl = link.href || '';
+            const streamUrl = link.getAttribute('href') || '';
 
-                games.push({
-                    home: home,
-                    away: away,
-                    league: league || 'Campeonato',
-                    matchTime: matchTime || '',
-                    matchDate: new Date().toISOString().split('T')[0],
-                    status: 'live',
-                    streamPageUrl: streamUrl,
-                    url: '', // Will need to be set manually or from stream page
-                    scoreHome: 0,
-                    scoreAway: 0,
-                    time: matchTime ? matchTime : 'Ao Vivo',
-                    emojiHome: getTeamEmoji(home),
-                    emojiAway: getTeamEmoji(away),
-                    viewers: Math.floor(Math.random() * 20000) + 1000,
-                    syncedAt: new Date().toISOString()
-                });
-            }
+            games.push({
+                home: home,
+                away: away,
+                league: league || 'Campeonato',
+                matchTime: matchTime || '',
+                matchDate: new Date().toISOString().split('T')[0],
+                status: 'live',
+                streamPageUrl: streamUrl,
+                url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+                scoreHome: 0,
+                scoreAway: 0,
+                time: matchTime || 'Ao Vivo',
+                emojiHome: getTeamEmoji(home),
+                emojiAway: getTeamEmoji(away),
+                viewers: Math.floor(Math.random() * 20000) + 1000,
+                syncedAt: new Date().toISOString()
+            });
         }
     });
 
-    // If link-based parsing didn't work well, try text-based parsing
-    if (games.length === 0) {
-        const bodyText = doc.body ? doc.body.innerHTML : html;
-
-        // Look for patterns that match team names with times
-        const timePattern = /(\d{1,2}:\d{2})/g;
-        const allText = doc.body ? doc.body.textContent : '';
-        const lines = allText.split('\n').map(l => l.trim()).filter(l => l.length > 3);
+    // Strategy 2: If link parsing found few/no results, try text parsing
+    if (games.length < 3) {
+        // Get only visible text, avoiding scripts/styles
+        const allElements = doc.querySelectorAll('body *:not(script):not(style):not(noscript)');
+        const textLines = [];
+        allElements.forEach(el => {
+            if (el.children.length === 0 || el.tagName === 'A') {
+                const txt = el.textContent.trim();
+                if (txt && txt.length > 1 && txt.length < 50 && !isJunk(txt)) {
+                    textLines.push(txt);
+                }
+            }
+        });
 
         let currentLeague = '';
         let currentTime = '';
         let teams = [];
 
-        for (const line of lines) {
-            // Skip junk lines
-            if (line.includes('Baixar') || line.includes('Atualizar') || line.includes('http') || line.length > 100) continue;
-
-            // Check for time
+        for (const line of textLines) {
+            // Time pattern
             const timeMatch = line.match(/^(\d{1,2}:\d{2})$/);
             if (timeMatch) {
                 currentTime = timeMatch[1];
                 continue;
             }
 
-            // Check for league-like strings
-            if (line.match(/^(Copa|Campeonato|Brasileiro|Serie|Premier|La Liga|Libertadores|Champions|Paulista|Carioca|Goiano|Baiano|Italiano|Espanhol|Frances|Alemao)/i) ||
-                line.match(/(League|Cup|Liga|Serie|Division)/i)) {
+            // League pattern
+            if (line.match(/^(Copa|Campeonato|Brasileiro|Serie|Premier|La Liga|Libertadores|Champions|Paulista|Carioca|Goiano|Baiano|Italiano|Espanhol|Frances|Alemao|UEFA|Sul-Americana|Recopa|Supercopa)/i) ||
+                line.match(/^.*(League|Cup|Liga|Division).*$/i)) {
                 currentLeague = line;
                 continue;
             }
 
-            // Check if it looks like a team name (no numbers, reasonable length)
-            if (line.length > 2 && line.length < 40 && !line.match(/^\d/) && !line.match(/^\./)) {
-                teams.push(line);
+            // Team name candidate
+            if (isValidTeamName(line) && !line.match(/^\d/)) {
+                // Avoid duplicates
+                const isDuplicate = games.some(g => g.home === line || g.away === line);
+                if (!isDuplicate) {
+                    teams.push(line);
+                }
 
-                // If we have a pair of teams
                 if (teams.length === 2) {
                     games.push({
                         home: teams[0],
@@ -492,7 +536,7 @@ function parseGamesFromHtml(html) {
                         matchDate: new Date().toISOString().split('T')[0],
                         status: 'live',
                         streamPageUrl: '',
-                        url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', // fallback
+                        url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
                         scoreHome: 0,
                         scoreAway: 0,
                         time: currentTime || 'Ao Vivo',
@@ -508,6 +552,7 @@ function parseGamesFromHtml(html) {
         }
     }
 
+    console.log('Parser encontrou', games.length, 'jogos validos');
     return games;
 }
 
