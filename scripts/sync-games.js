@@ -1,8 +1,6 @@
-// ===== FUTEBOL TV — AUTO SYNC + STREAM EXTRACTOR =====
+// ===== FUTEBOL TV — AUTO SYNC + STREAM EXTRACTOR v3 =====
 // Runs via GitHub Actions every 30 minutes
-// 1. Scrapes games from index page
-// 2. Follows each game link to extract M3U8 stream URL
-// 3. Saves games + streams to Firestore
+// FIXED: Uses apk.futemais.eu as source (works from any IP, no cloaking)
 
 const fetch = require('node-fetch');
 const { parse } = require('node-html-parser');
@@ -11,28 +9,22 @@ const { parse } = require('node-html-parser');
 const FIREBASE_API_KEY = 'AIzaSyAjZwn53tctIJyzd3jsDcLoQQ4l4ptNZHw';
 const PROJECT_ID = 'futebol-tv-app';
 const FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
-const SOURCE_URL = 'https://howtoblogging.info/?st=index';
 
-// Stream domain pattern
-const STREAM_DOMAIN = 'futemais.eu';
+// Source URLs
+const INDEX_URL = 'https://apk.futemais.eu/app2/';
+const PLAYER_BASE = 'https://links3.futemais.eu/canalapps.php';
 
 // ===== JUNK FILTER =====
 const JUNK_KEYWORDS = [
     'function', 'var ', 'const ', 'let ', 'push(', 'getElementById',
     'display:', 'width:', 'height:', 'margin:', 'padding:', 'border:',
-    'script', 'googletag', 'adsbygoogle', 'analytics',
-    'Hasync', 'Histats', 'cookie', 'window.', 'document.',
-    'innerHTML', 'className', 'addEventListener', '$.', 'jQuery',
-    '{', '}', '()', '=>', 'return ', 'async ', 'await ', 'import ',
-    'console.', 'setTimeout', 'setInterval', 'onclick', 'href=',
-    'src=', 'div.', 'span.', 'px;', 'em;', 'rem;', 'block;',
-    'inline', 'Baixar', 'Atualizar', 'Compartilhar', 'Whatsapp',
-    'APP', 'FUTEBOL DA HORA', 'http://', 'https://', 'www.',
-    '.com/', '.net/', '.js', '.css', '.php', '.html',
-    'Copyright', 'Privacy', 'Scholarship', 'Tax', 'Finance',
-    'Insurance', 'Google Cloud', 'Blog post', 'Article',
-    'Read more', 'Leia mais', 'Categories', 'Tags', 'Tips',
-    'How to', 'Crypto', 'Bitcoin', 'Investment', 'Portfolio'
+    'googletag', 'adsbygoogle', 'analytics', 'Hasync', 'Histats',
+    'cookie', 'window.', 'document.', 'innerHTML', 'addEventListener',
+    '{', '}', '()', '=>', 'return ', 'async ', 'import ',
+    'setTimeout', 'setInterval', 'onclick',
+    'Baixar', 'Atualizar', 'Compartilhar', 'Whatsapp',
+    'FUTEBOL DA HORA', 'APP', 'Voltar',
+    'Copyright', 'Privacy', 'Terms', 'About Us', 'Contact'
 ];
 
 function isJunk(text) {
@@ -41,10 +33,10 @@ function isJunk(text) {
 }
 
 function isValidTeamName(name) {
-    if (!name || name.length < 2 || name.length > 35) return false;
+    if (!name || name.length < 2 || name.length > 40) return false;
     if (isJunk(name)) return false;
     if (!/[a-zA-ZÀ-ú]/.test(name)) return false;
-    const letters = name.replace(/[^a-zA-ZÀ-ú\s\-]/g, '');
+    const letters = name.replace(/[^a-zA-ZÀ-ú\s\-\.]/g, '');
     if (letters.length < name.length * 0.5) return false;
     if (/[{}();=><\[\]]/.test(name)) return false;
     return true;
@@ -55,18 +47,16 @@ function getTeamEmoji(team) {
     if (n.includes('flamengo') || n.includes('internacional') || n.includes('inter')) return '🔴';
     if (n.includes('palmeiras') || n.includes('goias') || n.includes('goiás')) return '🟢';
     if (n.includes('corinthians') || n.includes('botafogo') || n.includes('vasco')) return '⚫';
-    if (n.includes('gremio') || n.includes('grêmio') || n.includes('cruzeiro')) return '🔵';
-    if (n.includes('sao paulo') || n.includes('são paulo') || n.includes('santos')) return '⚪';
+    if (n.includes('gremio') || n.includes('cruzeiro')) return '🔵';
+    if (n.includes('sao paulo') || n.includes('santos')) return '⚪';
     if (n.includes('fluminense')) return '🟤';
-    if (n.includes('bahia') || n.includes('vitoria') || n.includes('vitória')) return '🔴';
+    if (n.includes('bahia') || n.includes('vitoria')) return '🔴';
     if (n.includes('atletico') || n.includes('atlético')) return '⚫';
     if (n.includes('real madrid') || n.includes('juventus')) return '⚪';
     if (n.includes('barcelona') || n.includes('chelsea')) return '🔵';
-    if (n.includes('manchester city') || n.includes('city')) return '🔵';
-    if (n.includes('liverpool') || n.includes('milan') || n.includes('arsenal')) return '🔴';
-    if (n.includes('newcastle')) return '⚫';
-    if (n.includes('athletic') || n.includes('wrexham') || n.includes('bangu')) return '🔴';
-    if (n.includes('psg') || n.includes('paris') || n.includes('napoli') || n.includes('porto')) return '🔵';
+    if (n.includes('liverpool') || n.includes('arsenal')) return '🔴';
+    if (n.includes('manchester city')) return '🔵';
+    if (n.includes('psg') || n.includes('napoli') || n.includes('porto')) return '🔵';
     if (n.includes('bayern') || n.includes('benfica')) return '🔴';
     return '⚽';
 }
@@ -75,137 +65,110 @@ function getTeamEmoji(team) {
 async function fetchPage(url) {
     const res = await fetch(url, {
         headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.7',
-            'Referer': 'https://howtoblogging.info/'
+            'Referer': 'https://apk.futemais.eu/'
         },
-        redirect: 'follow',
-        timeout: 15000
+        redirect: 'follow'
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
     return await res.text();
 }
 
-// ===== RESOLVE GOOGLE REDIRECT =====
-function resolveGoogleRedirect(url) {
-    // Google wraps URLs like: https://www.google.com/url?q=https%3A%2F%2F...&sa=D&...
-    if (url.includes('google.com/url')) {
-        try {
-            const u = new URL(url);
-            const q = u.searchParams.get('q');
-            if (q) return q;
-        } catch (e) { }
-    }
-    return url;
-}
-
-// ===== EXTRACT STREAM URL FROM GAME PAGE =====
-async function extractStreamUrl(gamePageUrl) {
+// ===== EXTRACT M3U8 FROM PLAYER PAGE =====
+async function extractStreamUrl(gameId) {
     try {
-        const resolvedUrl = resolveGoogleRedirect(gamePageUrl);
-        console.log(`   🔍 Extracting stream from: ${resolvedUrl}`);
+        const playerUrl = `${PLAYER_BASE}?id=${gameId}`;
+        console.log(`   🔍 Fetching player page: ${playerUrl}`);
 
-        const html = await fetchPage(resolvedUrl);
+        const html = await fetchPage(playerUrl);
 
-        // Search for M3U8 URLs directly in the page HTML
-        const m3u8Matches = html.match(/https?:\/\/[^\s"'<>]*\.m3u8[^\s"'<>]*/gi) || [];
-        if (m3u8Matches.length > 0) {
-            console.log(`   ✅ Found M3U8 directly: ${m3u8Matches[0]}`);
-            return m3u8Matches[0];
+        // 1. Direct M3U8 in page
+        const m3u8Urls = html.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
+        if (m3u8Urls.length > 0) {
+            const url = m3u8Urls[0].replace(/\\+/g, '');
+            console.log(`   ✅ M3U8 found: ${url.substring(0, 80)}...`);
+            return url;
         }
 
-        // Search for iframes pointing to futemais.eu or player pages
-        const iframeMatches = html.match(/src=["']([^"']*(?:futemais|player|embed|live|stream)[^"']*)/gi) || [];
+        // 2. Look for iframe src
+        const iframeMatches = html.match(/(?:iframe|embed)[^>]*src=["']([^"']+)/gi) || [];
         for (const match of iframeMatches) {
-            const src = match.replace(/^src=["']/, '');
+            const srcMatch = match.match(/src=["']([^"']+)/i);
+            if (!srcMatch) continue;
+            let src = srcMatch[1];
+            if (src.startsWith('//')) src = 'https:' + src;
+
             console.log(`   📺 Found iframe: ${src}`);
 
-            // Follow the iframe to get the actual M3U8
-            try {
-                const playerHtml = await fetchPage(src.startsWith('//') ? 'https:' + src : src);
-                const streamUrls = playerHtml.match(/https?:\/\/[^\s"'<>]*\.m3u8[^\s"'<>]*/gi) || [];
-                if (streamUrls.length > 0) {
-                    console.log(`   ✅ Found M3U8 in iframe: ${streamUrls[0]}`);
-                    return streamUrls[0];
-                }
-
-                // Look for source in player config
-                const sourceMatches = playerHtml.match(/["']?(https?:\/\/[^\s"'<>]*(?:chunks|index|master|live)[^\s"'<>]*\.m3u8[^\s"'<>]*)/gi) || [];
-                if (sourceMatches.length > 0) {
-                    const cleanUrl = sourceMatches[0].replace(/^["']/, '');
-                    console.log(`   ✅ Found stream source: ${cleanUrl}`);
-                    return cleanUrl;
-                }
-            } catch (iframeErr) {
-                console.log(`   ⚠️ Could not fetch iframe: ${iframeErr.message}`);
-            }
-        }
-
-        // Search for futemais.eu URLs of any kind
-        const futeMaisUrls = html.match(/https?:\/\/[^\s"'<>]*futemais\.eu[^\s"'<>]*/gi) || [];
-        for (const url of futeMaisUrls) {
-            if (url.includes('/live/') || url.includes('canal') || url.includes('.m3u8')) {
-                console.log(`   ✅ Found futemais stream: ${url}`);
-                return url;
-            }
-        }
-
-        // Search for any embed/player URLs
-        const embedUrls = html.match(/src=["']([^"']*(?:\/embed\/|\/player\/|\/live\/|\/watch\/)[^"']*)/gi) || [];
-        for (const match of embedUrls) {
-            const embedSrc = match.replace(/^src=["']/, '');
-            console.log(`   📺 Found embed: ${embedSrc}`);
+            // Skip ad iframes
+            if (src.includes('ads') || src.includes('google') || src.includes('doubleclick')) continue;
 
             try {
-                const embedHtml = await fetchPage(embedSrc.startsWith('//') ? 'https:' + embedSrc : embedSrc);
-                const streamUrls = embedHtml.match(/https?:\/\/[^\s"'<>]*\.m3u8[^\s"'<>]*/gi) || [];
+                const iframeHtml = await fetchPage(src);
+                const streamUrls = iframeHtml.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
                 if (streamUrls.length > 0) {
-                    console.log(`   ✅ Found M3U8 in embed: ${streamUrls[0]}`);
-                    return streamUrls[0];
+                    const url = streamUrls[0].replace(/\\+/g, '');
+                    console.log(`   ✅ M3U8 from iframe: ${url.substring(0, 80)}...`);
+                    return url;
+                }
+
+                // Follow nested iframes
+                const nestedIframes = iframeHtml.match(/(?:iframe|embed)[^>]*src=["']([^"']+)/gi) || [];
+                for (const nested of nestedIframes) {
+                    const nestedSrc = nested.match(/src=["']([^"']+)/i);
+                    if (!nestedSrc) continue;
+                    let nSrc = nestedSrc[1];
+                    if (nSrc.startsWith('//')) nSrc = 'https:' + nSrc;
+                    if (nSrc.includes('ads') || nSrc.includes('google')) continue;
+
+                    console.log(`   📺 Nested iframe: ${nSrc}`);
+                    try {
+                        const nestedHtml = await fetchPage(nSrc);
+                        const nUrls = nestedHtml.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
+                        if (nUrls.length > 0) {
+                            const url = nUrls[0].replace(/\\+/g, '');
+                            console.log(`   ✅ M3U8 from nested: ${url.substring(0, 80)}...`);
+                            return url;
+                        }
+                    } catch (e) { }
                 }
             } catch (e) {
-                console.log(`   ⚠️ Could not fetch embed: ${e.message}`);
+                console.log(`   ⚠️ iframe fetch error: ${e.message}`);
             }
         }
 
-        // Extract the ?id= parameter and try direct futemais pattern
-        const idMatch = resolvedUrl.match(/[?&]id=(\d+)/);
-        if (idMatch) {
-            const gameId = idMatch[1];
-            // Try common patterns based on observed URLs
-            const patterns = [
-                `https://br.futemais.eu/live/canal${gameId}/chunks.m3u8`,
-                `https://br.futemais.eu/live/ch${gameId}/chunks.m3u8`,
-                `https://futemais.eu/live/${gameId}/chunks.m3u8`,
-            ];
-
-            for (const pattern of patterns) {
-                try {
-                    const testRes = await fetch(pattern, {
-                        method: 'HEAD',
-                        headers: { 'Referer': 'https://howtoblogging.info/' }
-                    });
-                    if (testRes.ok || testRes.status === 403) {
-                        // 403 means the URL exists but needs auth tokens
-                        console.log(`   🔗 Pattern match (needs token): ${pattern}`);
-                        return pattern;
-                    }
-                } catch (e) { }
+        // 3. Look for any futemais URLs with stream pattern
+        const futemaisUrls = html.match(/https?:\/\/[^\s"'<>\\]*futemais\.eu[^\s"'<>\\]*/gi) || [];
+        for (const fUrl of futemaisUrls) {
+            if (fUrl.includes('/live/') || fUrl.includes('canal') || fUrl.includes('.m3u8')) {
+                console.log(`   ✅ Futemais stream: ${fUrl.substring(0, 80)}...`);
+                return fUrl;
             }
         }
 
-        // Last resort: save the game page URL so user can watch via iframe
-        console.log(`   ⚠️ No M3U8 found, saving page URL as fallback`);
-        return resolvedUrl;
+        // 4. Look for source/file in JS configs
+        const jsConfigs = html.match(/["']?(source|file|url|src)["']?\s*[:=]\s*["'](https?:\/\/[^"']+)/gi) || [];
+        for (const cfg of jsConfigs) {
+            const urlMatch = cfg.match(/(https?:\/\/[^"']+)/);
+            if (urlMatch && (urlMatch[1].includes('.m3u8') || urlMatch[1].includes('/live/'))) {
+                console.log(`   ✅ JS config stream: ${urlMatch[1].substring(0, 80)}...`);
+                return urlMatch[1];
+            }
+        }
+
+        // 5. Fallback: return the player page URL for iframe embedding
+        console.log(`   ⚠️ No M3U8 found, using player page as fallback`);
+        return playerUrl;
 
     } catch (err) {
-        console.log(`   ❌ Error extracting stream: ${err.message}`);
+        console.log(`   ❌ Extract error: ${err.message}`);
         return '';
     }
 }
 
-// ===== PARSE GAMES FROM INDEX PAGE =====
+// ===== PARSE GAMES FROM INDEX =====
 function parseGamesFromIndex(html) {
     let clean = html.replace(/<script[\s\S]*?<\/script>/gi, '');
     clean = clean.replace(/<style[\s\S]*?<\/style>/gi, '');
@@ -216,43 +179,87 @@ function parseGamesFromIndex(html) {
     const games = [];
     const seen = new Set();
 
+    // Find all links with game IDs
     const links = root.querySelectorAll('a');
+    console.log(`   📊 Total links found: ${links.length}`);
+
     for (const link of links) {
         const href = link.getAttribute('href') || '';
-        if (!href.includes('howtoblogging') && !href.includes('?id=')) continue;
 
-        const text = link.text.trim().replace(/\.\s*\.\s*\./g, '').replace(/\s+/g, ' ');
-        if (!text || text.length < 5 || isJunk(text)) continue;
+        // Look for links with ?id= parameter
+        const idMatch = href.match(/[?&]id=(\d+)/);
+        if (!idMatch) continue;
 
+        const gameId = idMatch[1];
+        if (seen.has(gameId)) continue;
+
+        // Extract text content
+        const rawText = link.text.trim();
+        const text = rawText.replace(/\.\s*\.\s*\./g, '').replace(/\s+/g, ' ').trim();
+        if (!text || text.length < 3) continue;
+
+        // Parse the link text for team names, league, and time
+        // Text format: "TeamA  League  Time  TeamB  ..."
         const parts = text.split(/\s{2,}/).map(p => p.trim()).filter(p => p.length > 0);
-        if (parts.length < 3) continue;
 
-        const home = parts[0];
-        const away = parts[parts.length - 1];
-        if (!isValidTeamName(home) || !isValidTeamName(away)) continue;
+        // Also try splitting by newlines (the text may have them)
+        const altParts = rawText.split(/[\n\r]+/).map(p => p.trim()).filter(p => p.length > 1 && p !== '.');
 
-        const key = `${home}-${away}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
+        const useParts = parts.length >= 3 ? parts : altParts;
 
-        let league = '', matchTime = '';
-        for (let i = 1; i < parts.length - 1; i++) {
-            const p = parts[i].trim();
-            if (/^\d{1,2}:\d{2}$/.test(p)) matchTime = p;
-            else if (p.length > 2 && !isJunk(p)) league = p;
+        if (useParts.length < 2) {
+            console.log(`   ⚠️ Skipping id=${gameId}: not enough parts in "${text.substring(0, 50)}"`);
+            continue;
         }
 
-        // Resolve Google redirect URLs
-        const realHref = resolveGoogleRedirect(href);
+        let home = '', away = '', league = '', matchTime = '';
+
+        // First non-junk part = home team
+        for (const p of useParts) {
+            if (isValidTeamName(p) && !home) { home = p; continue; }
+            if (/^\d{1,2}:\d{2}$/.test(p)) { matchTime = p; continue; }
+            if (p.match(/^(Copa|Campeonato|Brasileiro|Serie|Premier|La Liga|Libertadores|Champions|Paulista|Carioca|Goiano|Baiano|Italiano|Espanhol|Bundesliga|Ligue|EFL|FA Cup)/i)) {
+                league = p; continue;
+            }
+            if (p.length > 2 && p.length < 30 && !isJunk(p) && !p.match(/^\.+$/)) {
+                if (home && !away) {
+                    // Check if it's a league or a team
+                    if (isValidTeamName(p)) away = p;
+                    else if (!league) league = p;
+                }
+            }
+        }
+
+        // If no away team found, try looking for X split
+        if (home && !away) {
+            const xMatch = text.match(/(.+?)\s*(?:x|vs|X|VS)\s*(.+)/);
+            if (xMatch) {
+                home = xMatch[1].trim();
+                away = xMatch[2].trim();
+            }
+        }
+
+        if (!home || !away) {
+            console.log(`   ⚠️ Skipping id=${gameId}: could not parse teams from "${text.substring(0, 60)}"`);
+            continue;
+        }
+
+        // Clean up team names
+        home = home.replace(/\s+/g, ' ').trim();
+        away = away.replace(/\s+/g, ' ').trim();
+
+        seen.add(gameId);
+
+        console.log(`   ✅ Game: ${home} x ${away} (${league || '?'}) ${matchTime || ''} [id=${gameId}]`);
 
         games.push({
-            home, away,
+            home, away, gameId,
             league: league || 'Campeonato',
             matchTime: matchTime || '',
             matchDate: new Date().toISOString().split('T')[0],
             status: 'live',
-            streamPageUrl: realHref,
-            url: '', // Will be filled with M3U8 URL
+            streamPageUrl: `${PLAYER_BASE}?id=${gameId}`,
+            url: '', // Will be filled with M3U8
             scoreHome: 0, scoreAway: 0,
             time: matchTime || 'Ao Vivo',
             emojiHome: getTeamEmoji(home),
@@ -260,46 +267,6 @@ function parseGamesFromIndex(html) {
             viewers: Math.floor(Math.random() * 20000) + 1000,
             syncedAt: new Date().toISOString()
         });
-    }
-
-    // Text fallback
-    if (games.length < 3) {
-        const body = root.querySelector('body');
-        if (body) {
-            const lines = body.text.split('\n').map(l => l.trim()).filter(l => l.length > 1 && l.length < 50 && !isJunk(l));
-            let currentLeague = '', currentTime = '', teams = [];
-
-            for (const line of lines) {
-                if (/^\d{1,2}:\d{2}$/.test(line)) { currentTime = line; continue; }
-                if (line.match(/^(Copa|Campeonato|Brasileiro|Serie|Premier|La Liga|Libertadores|Champions|Paulista|Carioca|Goiano|Baiano|Italiano|Espanhol)/i)) {
-                    currentLeague = line; continue;
-                }
-                if (isValidTeamName(line) && !line.match(/^\d/)) {
-                    if (!seen.has(`${line}-*`)) teams.push(line);
-                    if (teams.length === 2) {
-                        const key = `${teams[0]}-${teams[1]}`;
-                        if (!seen.has(key)) {
-                            seen.add(key);
-                            games.push({
-                                home: teams[0], away: teams[1],
-                                league: currentLeague || 'Campeonato',
-                                matchTime: currentTime || '',
-                                matchDate: new Date().toISOString().split('T')[0],
-                                status: 'live', streamPageUrl: '',
-                                url: '',
-                                scoreHome: 0, scoreAway: 0,
-                                time: currentTime || 'Ao Vivo',
-                                emojiHome: getTeamEmoji(teams[0]),
-                                emojiAway: getTeamEmoji(teams[1]),
-                                viewers: Math.floor(Math.random() * 20000) + 1000,
-                                syncedAt: new Date().toISOString()
-                            });
-                        }
-                        teams = []; currentTime = '';
-                    }
-                }
-            }
-        }
     }
 
     return games;
@@ -320,9 +287,9 @@ function gameToFirestoreDoc(game) {
 
 async function deleteOldSyncedDocs() {
     console.log('🗑️  Deleting old synced docs...');
-    const queryUrl = `${FIRESTORE_URL}/channels?key=${FIREBASE_API_KEY}&pageSize=100`;
+    const queryUrl = `${FIRESTORE_URL}/channels?key=${FIREBASE_API_KEY}&pageSize=200`;
     const res = await fetch(queryUrl);
-    if (!res.ok) { console.warn('Could not list docs:', res.status); return 0; }
+    if (!res.ok) { console.warn('   Could not list docs:', res.status); return 0; }
 
     const data = await res.json();
     const docs = data.documents || [];
@@ -350,7 +317,7 @@ async function addGameDoc(game) {
     });
     if (!res.ok) {
         const err = await res.text();
-        throw new Error(`Failed: ${res.status} — ${err}`);
+        throw new Error(`${res.status} — ${err.substring(0, 100)}`);
     }
     return true;
 }
@@ -360,78 +327,86 @@ async function main() {
     const brTime = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
     console.log('');
     console.log('==========================================');
-    console.log('⚽ FUTEBOL TV — AUTO SYNC + STREAM EXTRACT');
+    console.log('⚽ FUTEBOL TV — SYNC + STREAM EXTRACT v3');
     console.log(`📅 ${brTime}`);
     console.log('==========================================');
-    console.log('');
 
     try {
-        // 1. Fetch index page
-        console.log('📡 Step 1: Fetching game listings...');
-        const html = await fetchPage(SOURCE_URL);
+        // === Step 1: Get game list ===
+        console.log('\n📡 Step 1: Fetching game listings...');
+        const html = await fetchPage(INDEX_URL);
         console.log(`   Page loaded (${html.length} bytes)`);
 
-        // 2. Parse games
-        console.log('');
-        console.log('🎮 Step 2: Parsing games...');
+        // Debug: show first 500 chars of text content
+        const debugText = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').substring(0, 500);
+        console.log(`   📝 Preview: ${debugText.substring(0, 200)}...`);
+
+        // === Step 2: Parse games ===
+        console.log('\n🎮 Step 2: Parsing games...');
         const games = parseGamesFromIndex(html);
-        console.log(`   Found ${games.length} games`);
+        console.log(`\n   Total: ${games.length} games found`);
 
         if (games.length === 0) {
-            console.log('⚠️  No games found. Source may have changed.');
+            console.log('\n⚠️  No games found. Dumping HTML structure for debug:');
+            console.log(`   HTML length: ${html.length}`);
+            console.log(`   Has <a> tags: ${html.includes('<a ')}`);
+            console.log(`   Has ?id=: ${html.includes('?id=')}`);
+            console.log(`   Has futemais: ${html.includes('futemais')}`);
+            console.log(`   Has canalapps: ${html.includes('canalapps')}`);
+            // Show first link with id= for debugging
+            const firstIdLink = html.match(/<a[^>]*id=\d+[^>]*>[^<]*/i);
+            if (firstIdLink) console.log(`   First id link: ${firstIdLink[0].substring(0, 150)}`);
             process.exit(0);
         }
 
-        // 3. Extract stream URLs for each game
-        console.log('');
-        console.log('📺 Step 3: Extracting stream URLs...');
+        // === Step 3: Extract streams ===
+        console.log('\n📺 Step 3: Extracting stream URLs...');
         let streamsFound = 0;
 
         for (let i = 0; i < games.length; i++) {
             const game = games[i];
             console.log(`\n   [${i + 1}/${games.length}] ${game.home} x ${game.away}`);
 
-            if (game.streamPageUrl) {
-                const streamUrl = await extractStreamUrl(game.streamPageUrl);
-                if (streamUrl && streamUrl.includes('.m3u8')) {
+            const streamUrl = await extractStreamUrl(game.gameId);
+            if (streamUrl) {
+                if (streamUrl.includes('.m3u8')) {
                     game.url = streamUrl;
                     streamsFound++;
-                    console.log(`   ✅ Stream: ${streamUrl.substring(0, 80)}...`);
-                } else if (streamUrl) {
-                    // Save as fallback page URL
+                } else {
                     game.streamPageUrl = streamUrl;
-                    console.log(`   🔗 Saved page URL as fallback`);
                 }
             }
 
-            // Small delay to avoid rate limiting
-            await new Promise(r => setTimeout(r, 1000));
-        }
-
-        console.log(`\n   📊 Streams found: ${streamsFound}/${games.length}`);
-
-        // 4. Delete old docs
-        console.log('');
-        console.log('🗑️  Step 4: Cleaning old data...');
-        await deleteOldSyncedDocs();
-
-        // 5. Save to Firestore
-        console.log('');
-        console.log('💾 Step 5: Saving to Firestore...');
-        let saved = 0;
-        for (const game of games) {
-            try {
-                await addGameDoc(game);
-                saved++;
-            } catch (e) {
-                console.warn(`   ⚠️  Failed: ${game.home} x ${game.away} — ${e.message}`);
+            // Delay between requests
+            if (i < games.length - 1) {
+                await new Promise(r => setTimeout(r, 800));
             }
         }
 
-        // Summary
-        console.log('');
-        console.log('==========================================');
-        console.log(`✅ Sync complete!`);
+        console.log(`\n   📊 Streams: ${streamsFound}/${games.length}`);
+
+        // === Step 4: Clean old data ===
+        console.log('\n🗑️  Step 4: Cleaning old data...');
+        await deleteOldSyncedDocs();
+
+        // === Step 5: Save ===
+        console.log('\n💾 Step 5: Saving to Firestore...');
+        let saved = 0;
+        for (const game of games) {
+            try {
+                // Remove internal gameId before saving
+                const { gameId, ...saveData } = game;
+                await addGameDoc(saveData);
+                saved++;
+                console.log(`   ✅ Saved: ${game.home} x ${game.away}`);
+            } catch (e) {
+                console.warn(`   ❌ Failed: ${game.home} x ${game.away} — ${e.message}`);
+            }
+        }
+
+        // === Summary ===
+        console.log('\n==========================================');
+        console.log('✅ SYNC COMPLETE');
         console.log(`   🎮 Games: ${saved}/${games.length}`);
         console.log(`   📺 Streams: ${streamsFound}/${games.length}`);
         console.log('==========================================');
