@@ -79,86 +79,123 @@ async function fetchPage(url) {
 // ===== EXTRACT M3U8 FROM PLAYER PAGE =====
 async function extractStreamUrl(gameId) {
     try {
+        // STEP 1: Fetch the game player page (canalapps.php)
         const playerUrl = `${PLAYER_BASE}?id=${gameId}`;
-        console.log(`   🔍 Fetching player page: ${playerUrl}`);
-
+        console.log(`   🔍 Step A: Fetching player page...`);
         const html = await fetchPage(playerUrl);
 
-        // 1. Direct M3U8 in page
-        const m3u8Urls = html.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
-        if (m3u8Urls.length > 0) {
-            const url = m3u8Urls[0].replace(/\\+/g, '');
-            console.log(`   ✅ M3U8 found: ${url.substring(0, 80)}...`);
+        // STEP 2: Look for direct M3U8 first
+        const m3u8Direct = html.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
+        if (m3u8Direct.length > 0) {
+            const url = m3u8Direct[0].replace(/\\+/g, '');
+            console.log(`   ✅ Direct M3U8: ${url.substring(0, 80)}...`);
             return url;
         }
 
-        // 2. Look for iframe src
-        const iframeMatches = html.match(/(?:iframe|embed)[^>]*src=["']([^"']+)/gi) || [];
-        for (const match of iframeMatches) {
-            const srcMatch = match.match(/src=["']([^"']+)/i);
-            if (!srcMatch) continue;
-            let src = srcMatch[1];
-            if (src.startsWith('//')) src = 'https:' + src;
+        // STEP 3: Find iframe/embed URLs (opcao2.php with token)
+        // Pattern: src="https://links.futemais.eu/canais3/opcao2.php?id=canal7&token=..."
+        const allSrcs = html.match(/src=["']([^"']+)/gi) || [];
+        let opcaoUrl = '';
+        let canalId = '';
 
-            console.log(`   📺 Found iframe: ${src}`);
+        for (const match of allSrcs) {
+            const src = match.replace(/^src=["']/, '');
+            if (src.includes('opcao') || src.includes('canal') || src.includes('player')) {
+                if (src.includes('ads') || src.includes('google') || src.includes('doubleclick')) continue;
 
-            // Skip ad iframes
-            if (src.includes('ads') || src.includes('google') || src.includes('doubleclick')) continue;
+                let fullSrc = src;
+                if (fullSrc.startsWith('//')) fullSrc = 'https:' + fullSrc;
 
+                console.log(`   📺 Found player iframe: ${fullSrc.substring(0, 100)}...`);
+                opcaoUrl = fullSrc;
+
+                // Extract canal ID from the URL
+                const canalMatch = fullSrc.match(/id=(canal\d+)/i);
+                if (canalMatch) canalId = canalMatch[1];
+                break;
+            }
+        }
+
+        // Also search in onclick handlers and JS
+        if (!opcaoUrl) {
+            const jsUrls = html.match(/["'](https?:\/\/[^"']*(?:opcao|canais)[^"']*)/gi) || [];
+            for (const jUrl of jsUrls) {
+                const clean = jUrl.replace(/^["']/, '');
+                if (clean.includes('ads') || clean.includes('google')) continue;
+                console.log(`   📺 Found JS URL: ${clean.substring(0, 100)}...`);
+                opcaoUrl = clean;
+                const canalMatch = clean.match(/id=(canal\d+)/i);
+                if (canalMatch) canalId = canalMatch[1];
+                break;
+            }
+        }
+
+        // STEP 4: If we found opcao URL, follow it
+        if (opcaoUrl) {
             try {
-                const iframeHtml = await fetchPage(src);
-                const streamUrls = iframeHtml.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
-                if (streamUrls.length > 0) {
-                    const url = streamUrls[0].replace(/\\+/g, '');
-                    console.log(`   ✅ M3U8 from iframe: ${url.substring(0, 80)}...`);
+                console.log(`   🔍 Step B: Following iframe...`);
+                const opcaoHtml = await fetchPage(opcaoUrl);
+
+                // Look for M3U8 in the opcao page
+                const m3u8Opcao = opcaoHtml.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
+                if (m3u8Opcao.length > 0) {
+                    const url = m3u8Opcao[0].replace(/\\+/g, '');
+                    console.log(`   ✅ M3U8 from opcao: ${url.substring(0, 80)}...`);
                     return url;
                 }
 
-                // Follow nested iframes
-                const nestedIframes = iframeHtml.match(/(?:iframe|embed)[^>]*src=["']([^"']+)/gi) || [];
-                for (const nested of nestedIframes) {
-                    const nestedSrc = nested.match(/src=["']([^"']+)/i);
-                    if (!nestedSrc) continue;
-                    let nSrc = nestedSrc[1];
-                    if (nSrc.startsWith('//')) nSrc = 'https:' + nSrc;
-                    if (nSrc.includes('ads') || nSrc.includes('google')) continue;
+                // Look for Clappr/HLS source config
+                const sourceConfigs = opcaoHtml.match(/source\s*[:=]\s*["']([^"']+\.m3u8[^"']*)/gi) || [];
+                if (sourceConfigs.length > 0) {
+                    const srcMatch = sourceConfigs[0].match(/(https?:\/\/[^"']+)/);
+                    if (srcMatch) {
+                        console.log(`   ✅ Clappr source: ${srcMatch[1].substring(0, 80)}...`);
+                        return srcMatch[1];
+                    }
+                }
 
-                    console.log(`   📺 Nested iframe: ${nSrc}`);
+                // Look for any br.futemais.eu URLs
+                const brUrls = opcaoHtml.match(/https?:\/\/br\.futemais\.eu[^\s"'<>\\]*/gi) || [];
+                if (brUrls.length > 0) {
+                    console.log(`   ✅ BR stream: ${brUrls[0].substring(0, 80)}...`);
+                    return brUrls[0];
+                }
+
+                // Follow nested iframes
+                const nestedSrcs = opcaoHtml.match(/src=["']([^"']+)/gi) || [];
+                for (const ns of nestedSrcs) {
+                    const nSrc = ns.replace(/^src=["']/, '');
+                    if (nSrc.includes('ads') || nSrc.includes('google') || nSrc.includes('.js') || nSrc.includes('.css')) continue;
+                    let fullNSrc = nSrc.startsWith('//') ? 'https:' + nSrc : nSrc;
+                    if (!fullNSrc.startsWith('http')) continue;
+
+                    console.log(`   📺 Nested: ${fullNSrc.substring(0, 80)}...`);
                     try {
-                        const nestedHtml = await fetchPage(nSrc);
-                        const nUrls = nestedHtml.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
-                        if (nUrls.length > 0) {
-                            const url = nUrls[0].replace(/\\+/g, '');
+                        const nestedHtml = await fetchPage(fullNSrc);
+                        const nM3u8 = nestedHtml.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
+                        if (nM3u8.length > 0) {
+                            const url = nM3u8[0].replace(/\\+/g, '');
                             console.log(`   ✅ M3U8 from nested: ${url.substring(0, 80)}...`);
                             return url;
                         }
                     } catch (e) { }
                 }
+
             } catch (e) {
-                console.log(`   ⚠️ iframe fetch error: ${e.message}`);
+                console.log(`   ⚠️ Opcao fetch error: ${e.message}`);
             }
         }
 
-        // 3. Look for any futemais URLs with stream pattern
-        const futemaisUrls = html.match(/https?:\/\/[^\s"'<>\\]*futemais\.eu[^\s"'<>\\]*/gi) || [];
-        for (const fUrl of futemaisUrls) {
-            if (fUrl.includes('/live/') || fUrl.includes('canal') || fUrl.includes('.m3u8')) {
-                console.log(`   ✅ Futemais stream: ${fUrl.substring(0, 80)}...`);
-                return fUrl;
-            }
+        // STEP 5: If we have the canal ID, try constructing the stream URL directly
+        if (canalId) {
+            // The M3U8 URL pattern: https://br.futemais.eu/live/{canalId}/chunks.m3u8
+            // But it needs md5+expires tokens which are generated server-side
+            // Save the opcao URL as the best fallback (it has the player)
+            console.log(`   🔗 Canal: ${canalId}, saving opcao URL as stream page`);
+            return opcaoUrl || playerUrl;
         }
 
-        // 4. Look for source/file in JS configs
-        const jsConfigs = html.match(/["']?(source|file|url|src)["']?\s*[:=]\s*["'](https?:\/\/[^"']+)/gi) || [];
-        for (const cfg of jsConfigs) {
-            const urlMatch = cfg.match(/(https?:\/\/[^"']+)/);
-            if (urlMatch && (urlMatch[1].includes('.m3u8') || urlMatch[1].includes('/live/'))) {
-                console.log(`   ✅ JS config stream: ${urlMatch[1].substring(0, 80)}...`);
-                return urlMatch[1];
-            }
-        }
-
-        // 5. Fallback: return the player page URL for iframe embedding
+        // STEP 6: Fallback
         console.log(`   ⚠️ No M3U8 found, using player page as fallback`);
         return playerUrl;
 
