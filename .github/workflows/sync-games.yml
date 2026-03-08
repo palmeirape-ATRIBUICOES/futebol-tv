@@ -2,10 +2,10 @@ name: '⚽ Auto Sync Games'
 
 on:
   schedule:
-    # Runs every 30 minutes
+    # Runs every 30 minutes, 24/7
     - cron: '*/30 * * * *'
   workflow_dispatch:
-    # Allows manual trigger from GitHub UI
+    # Manual trigger from GitHub Actions UI
 
 permissions:
   contents: read
@@ -17,19 +17,16 @@ jobs:
     timeout-minutes: 5
     
     steps:
-      - name: Checkout Code
+      - name: '📥 Checkout'
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: '⚙️ Setup Node.js'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install Dependencies
+      - name: '📦 Install Dependencies'
         run: npm install
-        working-directory: .
 
-      - name: Run Sync Script
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      - name: '🔄 Run Sync'
         run: node scripts/sync-games.js

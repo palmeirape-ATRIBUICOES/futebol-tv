@@ -1,30 +1,15 @@
-// ===== FUTEBOL TV — AUTO SYNC SCRIPT =====
+// ===== FUTEBOL TV — AUTO SYNC SCRIPT (REST API) =====
 // Runs via GitHub Actions every 30 minutes
-// Scrapes games from source site and writes to Firebase Firestore
+// Uses Firestore REST API — no service account needed!
 
-const admin = require('firebase-admin');
 const fetch = require('node-fetch');
 const { parse } = require('node-html-parser');
 
-// ===== FIREBASE INIT =====
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
-
-if (!serviceAccount.project_id) {
-    console.error('❌ FIREBASE_SERVICE_ACCOUNT not configured!');
-    console.error('Please add a GitHub Secret named FIREBASE_SERVICE_ACCOUNT');
-    console.error('with your Firebase service account JSON.');
-    process.exit(1);
-}
-
-admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-});
-
-const db = admin.firestore();
-
 // ===== CONFIG =====
+const FIREBASE_API_KEY = 'AIzaSyAjZwn53tctIJyzd3jsDcLoQQ4l4ptNZHw';
+const PROJECT_ID = 'futebol-tv-app';
+const FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 const SOURCE_URL = 'https://howtoblogging.info/?st=index';
-const COLLECTION = 'channels';
 
 // ===== JUNK FILTER =====
 const JUNK_KEYWORDS = [
@@ -37,16 +22,12 @@ const JUNK_KEYWORDS = [
     'console.', 'setTimeout', 'setInterval', 'onclick', 'href=',
     'src=', 'div.', 'span.', 'px;', 'em;', 'rem;', 'block;',
     'inline', 'Baixar', 'Atualizar', 'Compartilhar', 'Whatsapp',
-    'APP', 'FUTEBOL DA HORA', 'http', 'www.', '.com', '.net',
-    '.js', '.css', '.php', '.html', 'Copyright', 'Privacy',
-    'Scholarship', 'Australia', 'Tax', 'Finance', 'Insurance',
-    'Google Cloud', 'Blog', 'Article', 'Read more', 'Leia mais',
-    'Categories', 'Tags', 'Tips', 'How to', 'Crypto', 'Bitcoin',
-    'Investment', 'Portfolio', 'Housing', 'Emergency', 'Support',
-    'Assistance', 'Natural Disasters', 'Tax Credits', 'Refund',
-    'IRS', 'Cash App', 'Taxes', 'Student', 'ABSTUDY', 'Austudy',
-    'GetYourRefund', 'MyFreeTaxes', 'TAFE', 'Scholarships', 'Youth',
-    'Allowance', 'Step 4', 'Apply for', 'University', 'College'
+    'APP', 'FUTEBOL DA HORA', 'http://', 'https://', 'www.',
+    '.com/', '.net/', '.js', '.css', '.php', '.html',
+    'Copyright', 'Privacy', 'Scholarship', 'Australia', 'Tax',
+    'Finance', 'Insurance', 'Google Cloud', 'Blog post', 'Article',
+    'Read more', 'Leia mais', 'Categories', 'Tags', 'Tips',
+    'How to', 'Crypto', 'Bitcoin', 'Investment', 'Portfolio'
 ];
 
 function isJunk(text) {
@@ -58,59 +39,51 @@ function isValidTeamName(name) {
     if (!name || name.length < 2 || name.length > 35) return false;
     if (isJunk(name)) return false;
     if (!/[a-zA-ZÀ-ú]/.test(name)) return false;
-    const letters = name.replace(/[^a-zA-ZÀ-ú]/g, '');
-    if (letters.length < name.length * 0.4) return false;
-    if (/[{}();=><]/.test(name)) return false;
+    const letters = name.replace(/[^a-zA-ZÀ-ú\s\-]/g, '');
+    if (letters.length < name.length * 0.5) return false;
+    if (/[{}();=><\[\]]/.test(name)) return false;
     return true;
 }
 
 // ===== TEAM EMOJIS =====
 function getTeamEmoji(team) {
-    const name = team.toLowerCase();
-    if (name.includes('flamengo') || name.includes('internacional') || name.includes('inter')) return '🔴';
-    if (name.includes('palmeiras') || name.includes('goias') || name.includes('goiás')) return '🟢';
-    if (name.includes('corinthians') || name.includes('botafogo') || name.includes('vasco')) return '⚫';
-    if (name.includes('gremio') || name.includes('grêmio') || name.includes('cruzeiro')) return '🔵';
-    if (name.includes('sao paulo') || name.includes('são paulo') || name.includes('santos')) return '⚪';
-    if (name.includes('fluminense')) return '🟤';
-    if (name.includes('bahia') || name.includes('vitoria') || name.includes('vitória')) return '🔴';
-    if (name.includes('atletico') || name.includes('atlético')) return '⚫';
-    if (name.includes('bangu')) return '🔴';
-    if (name.includes('real madrid') || name.includes('juventus')) return '⚪';
-    if (name.includes('barcelona') || name.includes('chelsea')) return '🔵';
-    if (name.includes('manchester city') || name.includes('city')) return '🔵';
-    if (name.includes('liverpool') || name.includes('milan') || name.includes('arsenal')) return '🔴';
-    if (name.includes('newcastle') || name.includes('pisa')) return '⚫';
-    if (name.includes('athletic')) return '🔴';
-    if (name.includes('wrexham')) return '🔴';
-    if (name.includes('psg') || name.includes('paris')) return '🔵';
-    if (name.includes('bayern') || name.includes('benfica')) return '🔴';
-    if (name.includes('porto') || name.includes('napoli')) return '🔵';
+    const n = team.toLowerCase();
+    if (n.includes('flamengo') || n.includes('internacional') || n.includes('inter')) return '🔴';
+    if (n.includes('palmeiras') || n.includes('goias') || n.includes('goiás')) return '🟢';
+    if (n.includes('corinthians') || n.includes('botafogo') || n.includes('vasco')) return '⚫';
+    if (n.includes('gremio') || n.includes('grêmio') || n.includes('cruzeiro')) return '🔵';
+    if (n.includes('sao paulo') || n.includes('são paulo') || n.includes('santos')) return '⚪';
+    if (n.includes('fluminense')) return '🟤';
+    if (n.includes('bahia') || n.includes('vitoria') || n.includes('vitória')) return '🔴';
+    if (n.includes('atletico') || n.includes('atlético')) return '⚫';
+    if (n.includes('real madrid') || n.includes('juventus')) return '⚪';
+    if (n.includes('barcelona') || n.includes('chelsea')) return '🔵';
+    if (n.includes('manchester city') || n.includes('city')) return '🔵';
+    if (n.includes('liverpool') || n.includes('milan') || n.includes('arsenal')) return '🔴';
+    if (n.includes('newcastle')) return '⚫';
+    if (n.includes('athletic') || n.includes('wrexham') || n.includes('bangu')) return '🔴';
+    if (n.includes('psg') || n.includes('paris') || n.includes('napoli') || n.includes('porto')) return '🔵';
+    if (n.includes('bayern') || n.includes('benfica')) return '🔴';
     return '⚽';
 }
 
-// ===== FETCH PAGE =====
+// ===== FETCH SOURCE PAGE =====
 async function fetchPage(url) {
-    console.log('📡 Buscando:', url);
-    const response = await fetch(url, {
+    console.log('📡 Fetching:', url);
+    const res = await fetch(url, {
         headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
-        },
-        timeout: 20000
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.7'
+        }
     });
-
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    return await response.text();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
 }
 
-// ===== PARSE GAMES =====
+// ===== PARSE GAMES FROM HTML =====
 function parseGames(html) {
-    // Remove scripts, styles, comments
+    // Strip scripts, styles, comments
     let clean = html.replace(/<script[\s\S]*?<\/script>/gi, '');
     clean = clean.replace(/<style[\s\S]*?<\/style>/gi, '');
     clean = clean.replace(/<noscript[\s\S]*?<\/noscript>/gi, '');
@@ -118,119 +91,88 @@ function parseGames(html) {
 
     const root = parse(clean);
     const games = [];
+    const seen = new Set();
 
-    // Strategy 1: Find links with game data
+    // Strategy 1: Parse links with game data
     const links = root.querySelectorAll('a');
-
     for (const link of links) {
         const href = link.getAttribute('href') || '';
         if (!href.includes('howtoblogging') && !href.includes('?id=')) continue;
 
-        const text = link.text.trim();
+        const text = link.text.trim().replace(/\.\s*\.\s*\./g, '').replace(/\s+/g, ' ');
         if (!text || text.length < 5 || isJunk(text)) continue;
 
-        // Clean text
-        const cleanText = text.replace(/\.\s*\.\s*\./g, '').replace(/\s+/g, ' ').trim();
-        if (cleanText.length < 5 || isJunk(cleanText)) continue;
+        const parts = text.split(/\s{2,}/).map(p => p.trim()).filter(p => p.length > 0);
+        if (parts.length < 3) continue;
 
-        // Split by multiple spaces
-        const parts = cleanText.split(/\s{2,}/).map(p => p.trim()).filter(p => p.length > 0);
+        const home = parts[0];
+        const away = parts[parts.length - 1];
+        if (!isValidTeamName(home) || !isValidTeamName(away)) continue;
 
-        if (parts.length >= 3) {
-            const home = parts[0].trim();
-            const away = parts[parts.length - 1].trim();
+        const key = `${home}-${away}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
 
-            if (!isValidTeamName(home) || !isValidTeamName(away)) continue;
-
-            let league = '';
-            let matchTime = '';
-
-            for (let i = 1; i < parts.length - 1; i++) {
-                const part = parts[i].trim();
-                if (/^\d{1,2}:\d{2}$/.test(part)) {
-                    matchTime = part;
-                } else if (part.length > 2 && !isJunk(part)) {
-                    league = part;
-                }
-            }
-
-            // Avoid duplicate games
-            const exists = games.some(g => g.home === home && g.away === away);
-            if (exists) continue;
-
-            games.push({
-                home,
-                away,
-                league: league || 'Campeonato',
-                matchTime: matchTime || '',
-                matchDate: new Date().toISOString().split('T')[0],
-                status: 'live',
-                streamPageUrl: href,
-                url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-                scoreHome: 0,
-                scoreAway: 0,
-                time: matchTime || 'Ao Vivo',
-                emojiHome: getTeamEmoji(home),
-                emojiAway: getTeamEmoji(away),
-                viewers: Math.floor(Math.random() * 20000) + 1000,
-                syncedAt: new Date().toISOString()
-            });
+        let league = '', matchTime = '';
+        for (let i = 1; i < parts.length - 1; i++) {
+            const p = parts[i].trim();
+            if (/^\d{1,2}:\d{2}$/.test(p)) matchTime = p;
+            else if (p.length > 2 && !isJunk(p)) league = p;
         }
+
+        games.push({
+            home, away,
+            league: league || 'Campeonato',
+            matchTime: matchTime || '',
+            matchDate: new Date().toISOString().split('T')[0],
+            status: 'live',
+            streamPageUrl: href,
+            url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+            scoreHome: 0, scoreAway: 0,
+            time: matchTime || 'Ao Vivo',
+            emojiHome: getTeamEmoji(home),
+            emojiAway: getTeamEmoji(away),
+            viewers: Math.floor(Math.random() * 20000) + 1000,
+            syncedAt: new Date().toISOString()
+        });
     }
 
-    // Strategy 2: Text-based fallback
+    // Strategy 2: Text fallback
     if (games.length < 3) {
-        console.log('⚠️ Links found few games, trying text fallback...');
-
-        const bodyText = root.querySelector('body');
-        if (bodyText) {
-            const allText = bodyText.text;
-            const lines = allText.split('\n').map(l => l.trim()).filter(l => l.length > 1 && l.length < 50);
-
-            let currentLeague = '';
-            let currentTime = '';
-            let teams = [];
+        console.log('⚠️ Few link-based games, trying text fallback...');
+        const body = root.querySelector('body');
+        if (body) {
+            const lines = body.text.split('\n').map(l => l.trim()).filter(l => l.length > 1 && l.length < 50 && !isJunk(l));
+            let currentLeague = '', currentTime = '', teams = [];
 
             for (const line of lines) {
-                if (isJunk(line)) continue;
-
-                const timeMatch = line.match(/^(\d{1,2}:\d{2})$/);
-                if (timeMatch) {
-                    currentTime = timeMatch[1];
-                    continue;
+                if (/^\d{1,2}:\d{2}$/.test(line)) { currentTime = line; continue; }
+                if (line.match(/^(Copa|Campeonato|Brasileiro|Serie|Premier|La Liga|Libertadores|Champions|Paulista|Carioca|Goiano|Baiano|Italiano|Espanhol)/i)) {
+                    currentLeague = line; continue;
                 }
-
-                if (line.match(/^(Copa|Campeonato|Brasileiro|Serie|Premier|La Liga|Libertadores|Champions|Paulista|Carioca|Goiano|Baiano|Italiano|Espanhol|Frances|Alemao|UEFA)/i)) {
-                    currentLeague = line;
-                    continue;
-                }
-
                 if (isValidTeamName(line) && !line.match(/^\d/)) {
-                    const isDuplicate = games.some(g => g.home === line || g.away === line);
-                    if (!isDuplicate) {
-                        teams.push(line);
-                    }
-
+                    const key1 = `${line}-*`;
+                    if (!seen.has(key1)) { teams.push(line); }
                     if (teams.length === 2) {
-                        games.push({
-                            home: teams[0],
-                            away: teams[1],
-                            league: currentLeague || 'Campeonato',
-                            matchTime: currentTime || '',
-                            matchDate: new Date().toISOString().split('T')[0],
-                            status: 'live',
-                            streamPageUrl: '',
-                            url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-                            scoreHome: 0,
-                            scoreAway: 0,
-                            time: currentTime || 'Ao Vivo',
-                            emojiHome: getTeamEmoji(teams[0]),
-                            emojiAway: getTeamEmoji(teams[1]),
-                            viewers: Math.floor(Math.random() * 20000) + 1000,
-                            syncedAt: new Date().toISOString()
-                        });
-                        teams = [];
-                        currentTime = '';
+                        const key = `${teams[0]}-${teams[1]}`;
+                        if (!seen.has(key)) {
+                            seen.add(key);
+                            games.push({
+                                home: teams[0], away: teams[1],
+                                league: currentLeague || 'Campeonato',
+                                matchTime: currentTime || '',
+                                matchDate: new Date().toISOString().split('T')[0],
+                                status: 'live', streamPageUrl: '',
+                                url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+                                scoreHome: 0, scoreAway: 0,
+                                time: currentTime || 'Ao Vivo',
+                                emojiHome: getTeamEmoji(teams[0]),
+                                emojiAway: getTeamEmoji(teams[1]),
+                                viewers: Math.floor(Math.random() * 20000) + 1000,
+                                syncedAt: new Date().toISOString()
+                            });
+                        }
+                        teams = []; currentTime = '';
                     }
                 }
             }
@@ -240,78 +182,115 @@ function parseGames(html) {
     return games;
 }
 
-// ===== SYNC TO FIRESTORE =====
-async function syncToFirestore(games) {
-    console.log(`💾 Salvando ${games.length} jogos no Firestore...`);
+// ===== FIRESTORE REST API HELPERS =====
+function gameToFirestoreDoc(game) {
+    const fields = {};
+    for (const [key, value] of Object.entries(game)) {
+        if (typeof value === 'number') {
+            fields[key] = { integerValue: String(value) };
+        } else {
+            fields[key] = { stringValue: String(value) };
+        }
+    }
+    return { fields };
+}
 
-    // 1. Delete old synced channels
-    const snapshot = await db.collection(COLLECTION)
-        .where('syncedAt', '!=', '')
-        .get();
+async function deleteOldSyncedDocs() {
+    console.log('🗑️ Deleting old synced docs...');
 
-    const batch = db.batch();
-    let deleteCount = 0;
+    // Query for docs with syncedAt field
+    const queryUrl = `${FIRESTORE_URL}/channels?key=${FIREBASE_API_KEY}&pageSize=100`;
+    const res = await fetch(queryUrl);
 
-    snapshot.forEach(doc => {
-        batch.delete(doc.ref);
-        deleteCount++;
+    if (!res.ok) {
+        console.warn('Could not list docs:', res.status);
+        return 0;
+    }
+
+    const data = await res.json();
+    const docs = data.documents || [];
+    let deleted = 0;
+
+    for (const doc of docs) {
+        // Check if this doc has syncedAt field (meaning it was auto-synced)
+        if (doc.fields && doc.fields.syncedAt && doc.fields.syncedAt.stringValue) {
+            const docPath = doc.name;
+            const delUrl = `https://firestore.googleapis.com/v1/${docPath}?key=${FIREBASE_API_KEY}`;
+            const delRes = await fetch(delUrl, { method: 'DELETE' });
+            if (delRes.ok) deleted++;
+        }
+    }
+
+    console.log(`   Deleted ${deleted} old docs`);
+    return deleted;
+}
+
+async function addGameDoc(game) {
+    const url = `${FIRESTORE_URL}/channels?key=${FIREBASE_API_KEY}`;
+    const body = gameToFirestoreDoc(game);
+
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
     });
 
-    if (deleteCount > 0) {
-        await batch.commit();
-        console.log(`🗑️ Removidos ${deleteCount} jogos antigos`);
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Failed to add doc: ${res.status} — ${err}`);
     }
 
-    // 2. Add new games in batches (Firestore limit: 500 per batch)
-    const addBatch = db.batch();
-
-    for (const game of games) {
-        const ref = db.collection(COLLECTION).doc();
-        addBatch.set(ref, {
-            ...game,
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-    }
-
-    await addBatch.commit();
-    console.log(`✅ ${games.length} jogos adicionados!`);
+    return true;
 }
 
 // ===== MAIN =====
 async function main() {
+    const brTime = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
     console.log('');
     console.log('==================================');
-    console.log('⚽ FUTEBOL TV — AUTO SYNC');
-    console.log(`📅 ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`);
+    console.log('⚽ FUTEBOL TV — AUTO SYNC 24/7');
+    console.log(`📅 ${brTime}`);
     console.log('==================================');
     console.log('');
 
     try {
-        // 1. Fetch the source page
+        // 1. Fetch source
         const html = await fetchPage(SOURCE_URL);
-        console.log(`📄 Pagina carregada (${html.length} bytes)`);
+        console.log(`📄 Page loaded (${html.length} bytes)`);
 
         // 2. Parse games
         const games = parseGames(html);
-        console.log(`🎮 ${games.length} jogos encontrados:`);
+        console.log(`🎮 Found ${games.length} valid games:`);
         games.forEach((g, i) => {
-            console.log(`   ${i + 1}. ${g.home} x ${g.away} (${g.league}) — ${g.matchTime || 'Ao Vivo'}`);
+            console.log(`   ${i + 1}. ${g.emojiHome} ${g.home} x ${g.away} ${g.emojiAway} (${g.league}) — ${g.matchTime || 'Ao Vivo'}`);
         });
 
         if (games.length === 0) {
-            console.log('⚠️ Nenhum jogo encontrado. O site pode ter mudado de estrutura.');
+            console.log('⚠️ No games found. Source site may have changed.');
             process.exit(0);
         }
 
-        // 3. Sync to Firestore
-        await syncToFirestore(games);
+        // 3. Delete old synced docs
+        await deleteOldSyncedDocs();
+
+        // 4. Add new games
+        console.log(`💾 Saving ${games.length} games to Firestore...`);
+        let saved = 0;
+        for (const game of games) {
+            try {
+                await addGameDoc(game);
+                saved++;
+            } catch (e) {
+                console.warn(`   ⚠️ Failed to save: ${game.home} x ${game.away} — ${e.message}`);
+            }
+        }
 
         console.log('');
-        console.log('✅ Sync concluida com sucesso!');
+        console.log(`✅ Sync complete! ${saved}/${games.length} games saved.`);
         console.log('==================================');
 
     } catch (err) {
-        console.error('❌ Erro na sincronizacao:', err.message);
+        console.error('❌ Sync error:', err.message);
         process.exit(1);
     }
 }
