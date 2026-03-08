@@ -333,21 +333,39 @@ function openPlayer(url, title, streamPageUrl) {
     document.getElementById('paywallOverlay').classList.remove('active');
     document.body.style.overflow = 'hidden';
 
-    // Update play button state
-    updatePlayPauseBtn(true);
-
     // Remove any existing iframe
     const existingIframe = document.getElementById('streamIframe');
     if (existingIframe) existingIframe.remove();
 
     const video = document.getElementById('videoPlayer');
+    const isIframeMode = !(url && url.includes('.m3u8')) && !!streamPageUrl;
+
+    // Hide/show media controls based on mode
+    // Iframe has its own controls, so hide ours
+    const btnPlayPause = document.getElementById('btnPlayPause');
+    const volumeCtrl = document.querySelector('.volume-control');
+    const btnCast = document.getElementById('btnCast');
+    const btnFullscreen = document.getElementById('btnFullscreen');
+
+    if (isIframeMode) {
+        if (btnPlayPause) btnPlayPause.style.display = 'none';
+        if (volumeCtrl) volumeCtrl.style.display = 'none';
+        if (btnCast) btnCast.style.display = 'none';
+        if (btnFullscreen) btnFullscreen.style.display = 'none';
+    } else {
+        if (btnPlayPause) btnPlayPause.style.display = '';
+        if (volumeCtrl) volumeCtrl.style.display = '';
+        if (btnCast) btnCast.style.display = '';
+        if (btnFullscreen) btnFullscreen.style.display = '';
+        updatePlayPauseBtn(true);
+    }
 
     if (url && url.includes('.m3u8')) {
         // Direct M3U8 stream
         video.style.display = '';
         loadHlsStream(url);
     } else if (streamPageUrl) {
-        // Fallback: load original game page in iframe
+        // Load original player in iframe
         video.style.display = 'none';
         hidePlayerError();
         const iframe = document.createElement('iframe');
