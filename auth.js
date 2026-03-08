@@ -94,9 +94,15 @@ const DataModule = {
     },
 
     onChannelsChange(callback) {
-        return db.collection('channels').orderBy('createdAt', 'desc')
+        return db.collection('channels')
             .onSnapshot(snap => {
                 const channels = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                // Sort: live first, then by time
+                channels.sort((a, b) => {
+                    if (a.status === 'live' && b.status !== 'live') return -1;
+                    if (a.status !== 'live' && b.status === 'live') return 1;
+                    return (b.syncedAt || b.createdAt || '').toString().localeCompare((a.syncedAt || a.createdAt || '').toString());
+                });
                 callback(channels);
             });
     },
