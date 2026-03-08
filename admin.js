@@ -50,6 +50,8 @@ function clearForm() {
     document.getElementById('chUrl').value = '';
     document.getElementById('chScoreHome').value = '0';
     document.getElementById('chScoreAway').value = '0';
+    document.getElementById('chMatchDate').value = '';
+    document.getElementById('chMatchTime').value = '';
     document.getElementById('chTime').value = '';
     document.getElementById('chStatus').value = 'live';
     document.getElementById('chThumb').value = '';
@@ -70,6 +72,8 @@ async function saveChannel(e) {
         url: document.getElementById('chUrl').value,
         scoreHome: parseInt(document.getElementById('chScoreHome').value) || 0,
         scoreAway: parseInt(document.getElementById('chScoreAway').value) || 0,
+        matchDate: document.getElementById('chMatchDate').value || '',
+        matchTime: document.getElementById('chMatchTime').value || '',
         time: document.getElementById('chTime').value,
         status: document.getElementById('chStatus').value,
         thumb: document.getElementById('chThumb').value,
@@ -240,6 +244,8 @@ async function editChannel(id) {
         document.getElementById('chUrl').value = ch.url || '';
         document.getElementById('chScoreHome').value = ch.scoreHome || 0;
         document.getElementById('chScoreAway').value = ch.scoreAway || 0;
+        document.getElementById('chMatchDate').value = ch.matchDate || '';
+        document.getElementById('chMatchTime').value = ch.matchTime || '';
         document.getElementById('chTime').value = ch.time || '';
         document.getElementById('chStatus').value = ch.status || 'live';
         document.getElementById('chThumb').value = ch.thumb || '';

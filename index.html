@@ -6,11 +6,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Futebol TV — Assista Jogos ao Vivo</title>
     <meta name="description"
-        content="Assista aos melhores jogos de futebol ao vivo. Transmissões em HD de todos os campeonatos.">
+        content="Assista aos melhores jogos de futebol ao vivo. Transmissoes em HD de todos os campeonatos.">
     <link rel="stylesheet" href="style.css">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0a0f">
     <link rel="apple-touch-icon" href="images/icon-192.png">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
     <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
@@ -38,7 +42,7 @@
             </a>
             <div class="nav-links">
                 <a href="#live">Ao Vivo</a>
-                <a href="#schedule">Programação</a>
+                <a href="#schedule">Agenda</a>
             </div>
             <div class="nav-cta" id="navCta">
                 <a href="#" class="btn btn-secondary" onclick="openLogin()">Entrar</a>
@@ -47,32 +51,48 @@
         </div>
     </nav>
 
-    <!-- HERO -->
-    <section class="hero">
+    <!-- HERO (compact, focused on matches) -->
+    <section class="hero" style="min-height:auto;padding:120px 0 40px">
         <div class="hero-bg"></div>
         <div class="hero-content">
-            <h1>Todos os jogos<br><span class="highlight">ao vivo</span> na palma da mão</h1>
-            <p>Assista aos melhores campeonatos de futebol em tempo real com qualidade HD.</p>
+            <h1>Jogos <span class="highlight">ao vivo</span> agora</h1>
+            <p>Clique no jogo e assista instantaneamente. Sem propagandas.</p>
             <div class="hero-badges">
-                <span class="badge-live"><span class="dot"></span> AO VIVO AGORA</span>
-                <span class="badge-count" id="matchCount">0 jogos disponíveis</span>
+                <span class="badge-live"><span class="dot"></span> AO VIVO</span>
+                <span class="badge-count" id="matchCount">Carregando...</span>
+                <span class="badge-count" id="todayDate"
+                    style="background:rgba(255,214,0,.08);border-color:rgba(255,214,0,.2);color:#ffd600"></span>
             </div>
         </div>
     </section>
 
-    <!-- MATCHES LIVE -->
-    <section class="section" id="live">
+    <!-- MATCHES LIST (style like reference site) -->
+    <section class="section" id="live" style="padding-top:20px">
         <div class="container">
-            <div class="section-header">
-                <h2 class="section-title"><span class="icon">🔴</span> Jogos ao Vivo</h2>
-                <span class="badge-live"><span class="dot"></span> LIVE</span>
+            <!-- Filter buttons -->
+            <div id="leagueFilters"
+                style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px;justify-content:center">
+                <button class="filter-btn active" onclick="filterMatches('all')">Todos</button>
             </div>
-            <div class="matches-grid" id="matchesGrid">
-                <!-- Cards gerados via JS -->
-                <div style="text-align:center;padding:60px 20px;color:var(--text-muted);grid-column:1/-1">
+            <!-- Matches list -->
+            <div id="matchesList" class="matches-list">
+                <div style="text-align:center;padding:60px 20px;color:var(--text-muted)">
                     <div style="font-size:3rem;margin-bottom:16px">📡</div>
-                    <p>Carregando jogos disponíveis...</p>
+                    <p>Carregando jogos...</p>
                 </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- PREMIUM CTA -->
+    <section class="section" style="padding:40px 0">
+        <div class="container" style="text-align:center">
+            <div
+                style="background:linear-gradient(135deg,rgba(255,214,0,0.05),rgba(0,230,118,0.05));border:1px solid rgba(255,214,0,0.15);border-radius:20px;padding:40px 24px">
+                <h3 style="font-size:1.3rem;font-weight:700;margin-bottom:8px">⭐ Acesso Premium Ilimitado</h3>
+                <p style="color:var(--text-secondary);margin-bottom:20px;font-size:.9rem">Assista todos os jogos sem
+                    limite de tempo por apenas <strong style="color:#ffd600">R$ 14,90/mes</strong></p>
+                <button class="btn btn-gold" onclick="openRegister()" style="font-size:.95rem">Assinar Agora</button>
             </div>
         </div>
     </section>
@@ -80,49 +100,80 @@
     <!-- FOOTER -->
     <footer class="footer">
         <div class="container">
-            <p>⚽ FUTEBOL TV &copy; 2026 — Todos os direitos reservados.</p>
+            <p>⚽ FUTEBOL TV &copy; 2026 — Sem propagandas. Totalmente seguro.</p>
         </div>
     </footer>
 
     <!-- ========== PLAYER PAGE (overlay) ========== -->
     <div class="player-page" id="playerPage">
         <div class="player-header">
-            <button class="player-back" onclick="closePlayer()">← Voltar</button>
+            <button class="player-back" onclick="closePlayer()">&#8592; Voltar</button>
             <span class="player-title" id="playerTitle">Carregando...</span>
             <span class="badge-live"><span class="dot"></span> AO VIVO</span>
         </div>
         <div class="player-container">
-            <video id="videoPlayer" autoplay playsinline></video>
+            <video id="videoPlayer" autoplay playsinline controls></video>
+            <!-- Custom controls bar -->
+            <div class="player-controls" id="playerControls">
+                <button class="ctrl-btn" id="btnPlayPause" onclick="togglePlayPause()"
+                    title="Play/Pause">&#9654;&#65039;</button>
+                <div class="volume-control">
+                    <button class="ctrl-btn" id="btnMute" onclick="toggleMute()" title="Mudo">&#128266;</button>
+                    <input type="range" id="volumeSlider" min="0" max="100" value="100" class="volume-slider"
+                        oninput="changeVolume(this.value)">
+                </div>
+                <div class="ctrl-spacer"></div>
+                <!-- Timer info -->
+                <div class="timer-badge-inline" id="timerBadgeInline">
+                    <span class="timer-icon">&#9201;</span>
+                    <span id="timerTextInline">Gratis: 2:00</span>
+                </div>
+                <!-- Early payment button -->
+                <button class="ctrl-btn ctrl-premium" id="btnEarlyPay" onclick="openPayment()"
+                    title="Assinar Premium">&#11088; Premium</button>
+                <!-- Chromecast -->
+                <button class="ctrl-btn" id="btnCast" onclick="tryCast()"
+                    title="Transmitir (Chromecast/WiFi)">&#128225;</button>
+                <!-- Fullscreen -->
+                <button class="ctrl-btn" id="btnFullscreen" onclick="toggleFullscreen()"
+                    title="Tela Cheia">&#x26F6;</button>
+            </div>
             <!-- Timer bar -->
             <div class="timer-bar" id="timerBar">
                 <div class="timer-bar-fill" id="timerFill"></div>
             </div>
-            <div class="timer-badge" id="timerBadge">
-                <span class="timer-icon">⏱</span>
-                <span id="timerText">Grátis: 40s</span>
-            </div>
 
             <!-- Paywall Overlay -->
             <div class="paywall-overlay" id="paywallOverlay">
-                <div class="paywall-icon">🔒</div>
-                <h2 class="paywall-title">Tempo grátis <span class="highlight">esgotado!</span></h2>
-                <p class="paywall-desc">Seu período de visualização gratuita acabou. Assine agora para continuar
+                <div class="paywall-icon">&#128274;</div>
+                <h2 class="paywall-title">Tempo gratis <span class="highlight">esgotado!</span></h2>
+                <p class="paywall-desc">Seu periodo de visualizacao gratuita acabou. Assine agora para continuar
                     assistindo todos os jogos ao vivo com qualidade HD.</p>
                 <div class="paywall-price">R$ 14,90</div>
-                <div class="paywall-period">por mês • Cancele quando quiser</div>
+                <div class="paywall-period">por mes &bull; Cancele quando quiser</div>
                 <ul class="paywall-features">
                     <li>Todos os jogos ao vivo sem limites</li>
                     <li>Qualidade HD e Full HD</li>
-                    <li>Acesso em até 3 dispositivos</li>
-                    <li>Sem anúncios durante os jogos</li>
+                    <li>Acesso em ate 3 dispositivos</li>
+                    <li>Sem anuncios durante os jogos</li>
                     <li>Replays e melhores momentos</li>
                 </ul>
-                <button class="btn btn-gold" onclick="openPayment()" style="font-size:1rem;padding:14px 40px">
-                    💳 Assinar Agora — R$ 14,90/mês
-                </button>
+
+                <!-- Payment with email form -->
+                <div id="paymentForm" style="margin-top:16px;width:100%;max-width:360px">
+                    <div class="form-group" style="margin-bottom:12px">
+                        <input type="email" id="payEmail" placeholder="Seu e-mail para acesso Premium" required
+                            style="width:100%;padding:12px 16px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff;font-size:.95rem">
+                    </div>
+                    <button class="btn btn-gold" onclick="processPayment()"
+                        style="font-size:1rem;padding:14px 40px;width:100%">
+                        &#128179; Pagar R$ 14,90 e Assinar
+                    </button>
+                </div>
+
                 <p style="margin-top:16px;color:var(--text-muted);font-size:.8rem">
-                    Ou <a href="#" onclick="openLogin()" style="color:var(--accent-green)">faça login</a> se já é
-                    assinante
+                    Ja e assinante? <a href="#" onclick="event.preventDefault();closePaywall();openLogin()"
+                        style="color:var(--accent-green)">Faca login</a>
                 </p>
             </div>
         </div>
@@ -142,7 +193,7 @@
                         placeholder="••••••••" required></div>
                 <button type="submit" class="btn btn-primary" id="loginBtn">Entrar</button>
             </form>
-            <p class="modal-link">Não tem conta? <a href="#"
+            <p class="modal-link">Nao tem conta? <a href="#"
                     onclick="event.preventDefault();closeLogin();openRegister()">Cadastre-se</a></p>
         </div>
     </div>
@@ -160,11 +211,11 @@
                 <div class="form-group"><label>E-mail</label><input type="email" id="regEmail"
                         placeholder="seu@email.com" required></div>
                 <div class="form-group"><label>Senha</label><input type="password" id="regPassword"
-                        placeholder="Mínimo 6 caracteres" required minlength="6"></div>
+                        placeholder="Minimo 6 caracteres" required minlength="6"></div>
                 <button type="submit" class="btn btn-primary" id="regBtn">Criar Conta</button>
             </form>
-            <p class="modal-link">Já tem conta? <a href="#"
-                    onclick="event.preventDefault();closeRegister();openLogin()">Faça login</a></p>
+            <p class="modal-link">Ja tem conta? <a href="#"
+                    onclick="event.preventDefault();closeRegister();openLogin()">Faca login</a></p>
         </div>
     </div>
 

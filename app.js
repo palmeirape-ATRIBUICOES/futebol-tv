@@ -2,7 +2,7 @@
 
 // Preloader
 window.addEventListener('load', () => {
-    setTimeout(() => document.getElementById('preloader').classList.add('hidden'), 1800);
+    setTimeout(() => document.getElementById('preloader').classList.add('hidden'), 1200);
 });
 
 // Navbar scroll
@@ -10,95 +10,194 @@ window.addEventListener('scroll', () => {
     document.getElementById('navbar').classList.toggle('scrolled', window.scrollY > 50);
 });
 
+// Show today's date
+const dateEl = document.getElementById('todayDate');
+if (dateEl) {
+    const today = new Date();
+    const options = { weekday: 'long', day: 'numeric', month: 'long' };
+    dateEl.textContent = today.toLocaleDateString('pt-BR', options);
+}
+
 // ===== STATE =====
 let currentChannelUrl = null;
 let hlsPlayer = null;
 let paywallTimer = null;
-let timeLeft = 40;
-const FREE_TIME = 40; // seconds
+let timeLeft = 120;
+const FREE_TIME = 120; // 2 minutes
+let allChannels = [];
 
-// ===== DEMO/SAMPLE CHANNELS =====
+// ===== DEMO CHANNELS =====
 const sampleChannels = [
     {
-        id: 'demo1', home: 'Flamengo', away: 'Palmeiras', league: 'Brasileirão Série A',
-        scoreHome: 2, scoreAway: 1, time: "67' 2º Tempo", status: 'live',
+        id: 'demo1', home: 'Flamengo', away: 'Palmeiras', league: 'Brasileirao Serie A',
+        scoreHome: 2, scoreAway: 1, time: "67' 2T", status: 'live',
         emojiHome: '🔴', emojiAway: '🟢', viewers: 12453,
+        matchDate: '2026-03-07', matchTime: '21:30',
         url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
     },
     {
         id: 'demo2', home: 'Real Madrid', away: 'Barcelona', league: 'La Liga',
-        scoreHome: 1, scoreAway: 1, time: "34' 1º Tempo", status: 'live',
+        scoreHome: 1, scoreAway: 1, time: "34' 1T", status: 'live',
         emojiHome: '⚪', emojiAway: '🔵', viewers: 34210,
+        matchDate: '2026-03-07', matchTime: '17:00',
         url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
     },
     {
-        id: 'demo3', home: 'Corinthians', away: 'São Paulo', league: 'Brasileirão Série A',
-        scoreHome: 0, scoreAway: 0, time: "12' 1º Tempo", status: 'live',
+        id: 'demo3', home: 'Corinthians', away: 'Sao Paulo', league: 'Brasileirao Serie A',
+        scoreHome: 0, scoreAway: 0, time: "12' 1T", status: 'live',
         emojiHome: '⚫', emojiAway: '🔴', viewers: 8721,
+        matchDate: '2026-03-07', matchTime: '19:00',
         url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
     },
     {
         id: 'demo4', home: 'Manchester City', away: 'Liverpool', league: 'Premier League',
-        scoreHome: 3, scoreAway: 2, time: "89' 2º Tempo", status: 'live',
+        scoreHome: 3, scoreAway: 2, time: "89' 2T", status: 'live',
         emojiHome: '🔵', emojiAway: '🔴', viewers: 45102,
+        matchDate: '2026-03-07', matchTime: '14:30',
         url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
     },
     {
-        id: 'demo5', home: 'Grêmio', away: 'Internacional', league: 'Brasileirão Série A',
-        scoreHome: 1, scoreAway: 0, time: "55' 2º Tempo", status: 'live',
+        id: 'demo5', home: 'Gremio', away: 'Internacional', league: 'Brasileirao Serie A',
+        scoreHome: 1, scoreAway: 0, time: "55' 2T", status: 'live',
         emojiHome: '🔵', emojiAway: '🔴', viewers: 6534,
+        matchDate: '2026-03-08', matchTime: '16:00',
         url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
     },
     {
         id: 'demo6', home: 'Juventus', away: 'Milan', league: 'Serie A',
-        scoreHome: 0, scoreAway: 1, time: "22' 1º Tempo", status: 'live',
+        scoreHome: 0, scoreAway: 1, time: "22' 1T", status: 'live',
         emojiHome: '⚪', emojiAway: '🔴', viewers: 15783,
+        matchDate: '2026-03-08', matchTime: '15:45',
         url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
     }
 ];
 
-// ===== RENDER MATCHES =====
+// ===== FORMAT TIME =====
+function formatMatchTime(ch) {
+    if (ch.matchDate && ch.matchTime) {
+        return ch.matchTime;
+    }
+    return ch.time || '--:--';
+}
+
+function formatMatchDate(ch) {
+    if (ch.matchDate) {
+        const d = new Date(ch.matchDate + 'T12:00:00');
+        const today = new Date();
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        if (d.toDateString() === today.toDateString()) return 'Hoje';
+        if (d.toDateString() === tomorrow.toDateString()) return 'Amanha';
+        return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    }
+    return '';
+}
+
+// ===== RENDER MATCHES AS LIST =====
 function renderMatches(channels) {
-    const grid = document.getElementById('matchesGrid');
+    const list = document.getElementById('matchesList');
     const count = document.getElementById('matchCount');
 
     if (!channels || channels.length === 0) {
-        // Use samples if no Firestore channels
         channels = sampleChannels;
     }
 
-    count.textContent = `${channels.length} jogos disponíveis`;
+    allChannels = channels;
+    count.textContent = channels.length + ' jogos disponiveis';
 
-    grid.innerHTML = channels.map(ch => `
-    <div class="match-card" onclick="openPlayer('${ch.url || ''}', '${ch.home} x ${ch.away}')">
-      <div class="match-card-thumb">
-        <div style="width:100%;height:100%;background:linear-gradient(135deg,#1a1a28 0%,#2a2a3a 100%);display:flex;align-items:center;justify-content:center;font-size:3rem">
-          ${ch.emojiHome || '⚽'} ⚡ ${ch.emojiAway || '⚽'}
-        </div>
-        <div class="match-card-overlay"></div>
-        ${ch.status === 'live' ? '<div class="match-card-live"><span class="badge-live"><span class="dot"></span> AO VIVO</span></div>' : ''}
-        <div class="match-card-viewers">👁 ${(ch.viewers || 0).toLocaleString('pt-BR')}</div>
-      </div>
-      <div class="match-card-body">
-        <div class="match-teams">
-          <div class="match-team">
-            <div class="match-team-logo">${ch.emojiHome || '⚽'}</div>
-            <span class="match-team-name">${ch.home}</span>
-          </div>
-          <div class="match-score">${ch.scoreHome ?? 0} x ${ch.scoreAway ?? 0}</div>
-          <div class="match-team">
-            <div class="match-team-logo">${ch.emojiAway || '⚽'}</div>
-            <span class="match-team-name">${ch.away}</span>
-          </div>
-        </div>
-        <div class="match-info">
-          <span class="match-league">🏆 ${ch.league || 'Campeonato'}</span>
-          <span class="match-time">${ch.time || '--'}</span>
-        </div>
-      </div>
-      <button class="match-card-play">▶</button>
-    </div>
-  `).join('');
+    // Build league filters
+    buildLeagueFilters(channels);
+
+    // Group by date
+    const groups = {};
+    channels.forEach(ch => {
+        const dateKey = ch.matchDate || 'live';
+        const dateLabel = formatMatchDate(ch) || 'Ao Vivo';
+        if (!groups[dateKey]) groups[dateKey] = { label: dateLabel, matches: [] };
+        groups[dateKey].matches.push(ch);
+    });
+
+    let html = '';
+
+    // Sort groups: today first, then chronological
+    const sortedKeys = Object.keys(groups).sort();
+
+    sortedKeys.forEach(key => {
+        const group = groups[key];
+        html += '<div class="match-date-group">';
+        html += '<div class="match-date-header">';
+        html += '<span class="match-date-label">' + group.label + '</span>';
+        html += '<span class="match-date-count">' + group.matches.length + ' jogos</span>';
+        html += '</div>';
+
+        group.matches.forEach(ch => {
+            const statusClass = ch.status === 'live' ? 'live' : ch.status === 'scheduled' ? 'scheduled' : 'ended';
+            const statusText = ch.status === 'live' ? 'AO VIVO' : ch.status === 'scheduled' ? 'Em Breve' : 'Encerrado';
+            const statusDot = ch.status === 'live' ? '🔴' : ch.status === 'scheduled' ? '🟡' : '⚫';
+
+            html += '<div class="match-item ' + statusClass + '" onclick="openPlayer(\'' + (ch.url || '') + '\', \'' + ch.home + ' x ' + ch.away + '\')">';
+            html += '  <div class="match-item-left">';
+            html += '    <div class="match-item-teams">';
+            html += '      <span class="match-team-emoji">' + (ch.emojiHome || '⚽') + '</span>';
+            html += '      <div class="match-team-names">';
+            html += '        <span class="team-home">' + ch.home + '</span>';
+            html += '        <span class="team-vs">vs</span>';
+            html += '        <span class="team-away">' + ch.away + '</span>';
+            html += '      </div>';
+            html += '      <span class="match-team-emoji">' + (ch.emojiAway || '⚽') + '</span>';
+            html += '    </div>';
+            html += '  </div>';
+            html += '  <div class="match-item-center">';
+            html += '    <span class="match-league-tag">' + (ch.league || 'Campeonato') + '</span>';
+            html += '  </div>';
+            html += '  <div class="match-item-right">';
+            html += '    <span class="match-item-time">' + formatMatchTime(ch) + '</span>';
+            html += '    <span class="match-item-status ' + statusClass + '">' + statusDot + ' ' + statusText + '</span>';
+            if (ch.status === 'live') {
+                html += '    <span class="match-item-score">' + (ch.scoreHome ?? 0) + ' x ' + (ch.scoreAway ?? 0) + '</span>';
+            }
+            html += '  </div>';
+            html += '  <div class="match-item-play">';
+            html += '    <span class="play-icon">&#9654;</span>';
+            html += '  </div>';
+            html += '</div>';
+        });
+
+        html += '</div>';
+    });
+
+    list.innerHTML = html;
+}
+
+// ===== LEAGUE FILTERS =====
+function buildLeagueFilters(channels) {
+    const filtersDiv = document.getElementById('leagueFilters');
+    const leagues = [...new Set(channels.map(c => c.league).filter(Boolean))];
+
+    let html = '<button class="filter-btn active" onclick="filterMatches(\'all\')">Todos (' + channels.length + ')</button>';
+    leagues.forEach(league => {
+        const count = channels.filter(c => c.league === league).length;
+        html += '<button class="filter-btn" onclick="filterMatches(\'' + league.replace(/'/g, "\\'") + '\')">' + league + ' (' + count + ')</button>';
+    });
+    filtersDiv.innerHTML = html;
+}
+
+function filterMatches(league) {
+    // Update active filter button
+    document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+
+    if (league === 'all') {
+        renderMatches(allChannels);
+    } else {
+        const filtered = allChannels.filter(c => c.league === league);
+        const list = document.getElementById('matchesList');
+        // Re-render only the filtered matches
+        const temp = allChannels;
+        renderMatches(filtered);
+        allChannels = temp; // restore full list
+    }
 }
 
 // ===== HLS PLAYER =====
@@ -112,13 +211,11 @@ function showPlayerError(msg) {
         container.style.position = 'relative';
         container.appendChild(errDiv);
     }
-    errDiv.innerHTML = `
-        <div style="font-size:3rem;margin-bottom:12px">📡</div>
-        <h3 style="color:#ff3b30;margin-bottom:8px;font-size:1.1rem">Stream Indisponivel</h3>
-        <p style="color:rgba(255,255,255,0.6);font-size:.85rem;line-height:1.5;margin-bottom:16px">${msg}</p>
-        <button onclick="retryStream()" style="background:linear-gradient(135deg,#00e676,#00c853);color:#000;border:none;padding:10px 24px;border-radius:8px;font-weight:700;cursor:pointer;margin-right:8px">Tentar Novamente</button>
-        <button onclick="closePlayer()" style="background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:10px 24px;border-radius:8px;cursor:pointer">Voltar</button>
-    `;
+    errDiv.innerHTML = '<div style="font-size:3rem;margin-bottom:12px">📡</div>' +
+        '<h3 style="color:#ff3b30;margin-bottom:8px;font-size:1.1rem">Stream Indisponivel</h3>' +
+        '<p style="color:rgba(255,255,255,0.6);font-size:.85rem;line-height:1.5;margin-bottom:16px">' + msg + '</p>' +
+        '<button onclick="retryStream()" style="background:linear-gradient(135deg,#00e676,#00c853);color:#000;border:none;padding:10px 24px;border-radius:8px;font-weight:700;cursor:pointer;margin-right:8px">Tentar Novamente</button>' +
+        '<button onclick="closePlayer()" style="background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:10px 24px;border-radius:8px;cursor:pointer">Voltar</button>';
     errDiv.style.display = 'block';
 }
 
@@ -159,11 +256,10 @@ function loadHlsStream(url) {
             if (data.fatal) {
                 switch (data.type) {
                     case Hls.ErrorTypes.NETWORK_ERROR:
-                        showPlayerError('Erro de rede. O stream pode estar offline ou bloqueado por CORS. Verifique a URL no painel admin.');
+                        showPlayerError('Erro de rede. O stream pode estar offline ou bloqueado por CORS.');
                         hlsPlayer.destroy();
                         break;
                     case Hls.ErrorTypes.MEDIA_ERROR:
-                        console.warn('Erro de midia, tentando recuperar...');
                         hlsPlayer.recoverMediaError();
                         break;
                     default:
@@ -185,28 +281,35 @@ function loadHlsStream(url) {
 }
 
 function openPlayer(url, title) {
-    // Check if user is premium
     const isPremium = AuthModule.userData && AuthModule.userData.premium;
-
     currentChannelUrl = url;
     document.getElementById('playerTitle').textContent = title;
     document.getElementById('playerPage').classList.add('active');
     document.getElementById('paywallOverlay').classList.remove('active');
+    document.body.style.overflow = 'hidden';
 
-    // Start video with error handling
+    // Update play button state
+    updatePlayPauseBtn(true);
+
     loadHlsStream(url);
 
-    // Start paywall timer (only if not premium)
+    // Timer
     if (!isPremium) {
         startPaywallTimer();
+        const earlyPayBtn = document.getElementById('btnEarlyPay');
+        if (earlyPayBtn) earlyPayBtn.style.display = '';
     } else {
         document.getElementById('timerBar').style.display = 'none';
-        document.getElementById('timerBadge').innerHTML = '<span style="color:var(--accent-green)">✅ Premium</span>';
+        const badge = document.getElementById('timerBadgeInline');
+        if (badge) badge.innerHTML = '<span style="color:var(--accent-green)">&#10004; Premium</span>';
+        const earlyPayBtn = document.getElementById('btnEarlyPay');
+        if (earlyPayBtn) earlyPayBtn.style.display = 'none';
     }
 }
 
 function closePlayer() {
     document.getElementById('playerPage').classList.remove('active');
+    document.body.style.overflow = '';
     const video = document.getElementById('videoPlayer');
     video.pause();
     if (hlsPlayer) { hlsPlayer.destroy(); hlsPlayer = null; }
@@ -214,36 +317,95 @@ function closePlayer() {
     paywallTimer = null;
     timeLeft = FREE_TIME;
 
-    // Reset timer UI
-    document.getElementById('timerFill').style.width = '100%';
-    document.getElementById('timerBadge').innerHTML = '<span class="timer-icon">⏱</span><span id="timerText">Grátis: 40s</span>';
-    document.getElementById('timerBar').style.display = '';
+    // Reset timer
+    const fill = document.getElementById('timerFill');
+    if (fill) fill.style.width = '100%';
+    const badge = document.getElementById('timerBadgeInline');
+    if (badge) badge.innerHTML = '<span class="timer-icon">&#9201;</span><span id="timerTextInline">Gratis: 2:00</span>';
+    const bar = document.getElementById('timerBar');
+    if (bar) bar.style.display = '';
 }
 
-// ===== PAYWALL TIMER =====
+// ===== PLAYER CONTROLS =====
+function togglePlayPause() {
+    const video = document.getElementById('videoPlayer');
+    if (video.paused) {
+        video.play().catch(() => { });
+        updatePlayPauseBtn(true);
+    } else {
+        video.pause();
+        updatePlayPauseBtn(false);
+    }
+}
+
+function updatePlayPauseBtn(playing) {
+    const btn = document.getElementById('btnPlayPause');
+    if (btn) btn.innerHTML = playing ? '⏸' : '▶️';
+}
+
+function toggleMute() {
+    const video = document.getElementById('videoPlayer');
+    const btn = document.getElementById('btnMute');
+    const slider = document.getElementById('volumeSlider');
+    video.muted = !video.muted;
+    if (btn) btn.innerHTML = video.muted ? '🔇' : '🔊';
+    if (slider) slider.value = video.muted ? 0 : video.volume * 100;
+}
+
+function changeVolume(val) {
+    const video = document.getElementById('videoPlayer');
+    const btn = document.getElementById('btnMute');
+    video.volume = val / 100;
+    video.muted = val == 0;
+    if (btn) btn.innerHTML = val == 0 ? '🔇' : val < 50 ? '🔉' : '🔊';
+}
+
+function toggleFullscreen() {
+    const container = document.getElementById('playerPage');
+    if (!document.fullscreenElement) {
+        (container.requestFullscreen || container.webkitRequestFullscreen || container.mozRequestFullScreen).call(container);
+    } else {
+        (document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen).call(document);
+    }
+}
+
+function tryCast() {
+    // Try native cast API or show manual instructions
+    if (navigator.mediaDevices && 'getDisplayMedia' in navigator.mediaDevices) {
+        alert('📺 Para transmitir via Chromecast:\n\n1. Clique nos 3 pontos do Chrome (⋮)\n2. Selecione "Transmitir..."\n3. Escolha seu dispositivo Chromecast\n\nOu use o botao Transmitir do navegador.');
+    } else {
+        alert('📺 Para transmitir:\n\nUse o menu do navegador > Transmitir\nOu conecte via HDMI/Smart TV.');
+    }
+}
+
+// Video event listeners
+document.getElementById('videoPlayer').addEventListener('play', () => updatePlayPauseBtn(true));
+document.getElementById('videoPlayer').addEventListener('pause', () => updatePlayPauseBtn(false));
+
+// ===== PAYWALL TIMER (2 MINUTES) =====
 function startPaywallTimer() {
     timeLeft = FREE_TIME;
     const fill = document.getElementById('timerFill');
-    const text = document.getElementById('timerText');
     const bar = document.getElementById('timerBar');
-    const badge = document.getElementById('timerBadge');
 
-    bar.style.display = '';
-    badge.innerHTML = '<span class="timer-icon">⏱</span><span id="timerText">Grátis: 40s</span>';
+    if (bar) bar.style.display = '';
 
     paywallTimer = setInterval(() => {
         timeLeft--;
         const pct = (timeLeft / FREE_TIME) * 100;
-        fill.style.width = pct + '%';
+        if (fill) fill.style.width = pct + '%';
 
-        const timerTextEl = document.getElementById('timerText');
-        if (timerTextEl) {
-            timerTextEl.textContent = `Grátis: ${timeLeft}s`;
-        }
+        // Format mm:ss
+        const mins = Math.floor(timeLeft / 60);
+        const secs = timeLeft % 60;
+        const timeStr = mins + ':' + (secs < 10 ? '0' : '') + secs;
 
-        // Change color when low
-        if (timeLeft <= 10) {
-            fill.style.background = 'var(--gradient-live)';
+        const timerInline = document.getElementById('timerTextInline');
+        if (timerInline) timerInline.textContent = 'Gratis: ' + timeStr;
+
+        // Warning colors
+        if (timeLeft <= 30) {
+            if (fill) fill.style.background = 'linear-gradient(90deg,#ff3b30,#ff6b35)';
         }
 
         if (timeLeft <= 0) {
@@ -254,53 +416,100 @@ function startPaywallTimer() {
 }
 
 function triggerPaywall() {
-    // Pause video
     document.getElementById('videoPlayer').pause();
-    // Show paywall
     document.getElementById('paywallOverlay').classList.add('active');
-    // Hide timer
     document.getElementById('timerBar').style.display = 'none';
-    document.getElementById('timerBadge').innerHTML = '<span style="color:var(--accent-red)">🔒 Bloqueado</span>';
+    const badge = document.getElementById('timerBadgeInline');
+    if (badge) badge.innerHTML = '<span style="color:var(--accent-red)">🔒 Bloqueado</span>';
 
-    // Block in Firestore
+    // Pre-fill email if logged in
+    const payEmail = document.getElementById('payEmail');
+    if (payEmail && AuthModule.currentUser) {
+        payEmail.value = AuthModule.currentUser.email;
+    }
+
     const identifier = AuthModule.currentUser ? AuthModule.currentUser.uid : getClientIP();
     DataModule.blockAccess(identifier).catch(() => { });
 }
 
+function closePaywall() {
+    document.getElementById('paywallOverlay').classList.remove('active');
+}
+
 function getClientIP() {
-    // Fallback: use a fingerprint from user agent + screen size
     return 'anon_' + btoa(navigator.userAgent.substring(0, 30) + screen.width + screen.height).substring(0, 20);
 }
 
-// ===== PAYMENT =====
-function openPayment() {
-    // For MVP: simulate payment with a confirmation
+// ===== PAYMENT WITH EMAIL =====
+async function processPayment() {
+    const emailInput = document.getElementById('payEmail');
+    const email = emailInput ? emailInput.value.trim() : '';
+
+    if (!email || !email.includes('@')) {
+        alert('Por favor, insira um e-mail valido para receber o acesso Premium.');
+        return;
+    }
+
     const confirmed = confirm(
-        '💳 PAGAMENTO — R$ 14,90/mês\n\n' +
-        'No MVP, o pagamento é simulado.\n' +
-        'Em produção, integraremos com Mercado Pago/PIX.\n\n' +
-        'Clique OK para simular pagamento aprovado.'
+        '💳 CONFIRMAR PAGAMENTO\n\n' +
+        'Valor: R$ 14,90/mes\n' +
+        'E-mail: ' + email + '\n\n' +
+        'Apos o pagamento, voce tera acesso ilimitado a todos os jogos.\n\n' +
+        'Clique OK para confirmar.'
     );
 
-    if (confirmed) {
-        // Grant access
-        const identifier = AuthModule.currentUser ? AuthModule.currentUser.uid : getClientIP();
-        DataModule.grantAccess(identifier).then(() => {
-            // If logged in, update premium status
-            if (AuthModule.currentUser) {
-                db.collection('users').doc(AuthModule.currentUser.uid).update({ premium: true });
-                AuthModule.userData.premium = true;
+    if (!confirmed) return;
+
+    try {
+        // If user is not logged in, try to create account or log in with this email
+        if (!AuthModule.currentUser) {
+            // Try login first
+            let result = await AuthModule.login(email, 'premium2026');
+            if (!result.success) {
+                // Create account
+                result = await AuthModule.register(email, 'premium2026', { name: 'Premium' });
             }
-            // Remove paywall
-            document.getElementById('paywallOverlay').classList.remove('active');
-            document.getElementById('timerBar').style.display = 'none';
-            document.getElementById('timerBadge').innerHTML = '<span style="color:var(--accent-green)">✅ Premium</span>';
-            // Resume video
-            document.getElementById('videoPlayer').play().catch(() => { });
-            alert('✅ Pagamento confirmado! Aproveite todos os jogos sem limites.');
-        }).catch(() => {
-            alert('Erro ao processar. Tente novamente.');
-        });
+        }
+
+        // Grant premium access
+        const uid = AuthModule.currentUser ? AuthModule.currentUser.uid : null;
+        if (uid) {
+            await db.collection('users').doc(uid).update({ premium: true });
+            AuthModule.userData.premium = true;
+        }
+
+        const identifier = uid || getClientIP();
+        await DataModule.grantAccess(identifier);
+
+        // Remove paywall, resume
+        document.getElementById('paywallOverlay').classList.remove('active');
+        document.getElementById('timerBar').style.display = 'none';
+        const badge = document.getElementById('timerBadgeInline');
+        if (badge) badge.innerHTML = '<span style="color:var(--accent-green)">&#10004; Premium</span>';
+        const earlyPayBtn = document.getElementById('btnEarlyPay');
+        if (earlyPayBtn) earlyPayBtn.style.display = 'none';
+
+        document.getElementById('videoPlayer').play().catch(() => { });
+        clearInterval(paywallTimer);
+
+        alert('✅ Pagamento confirmado!\n\nE-mail premium: ' + email + '\n\nAproveite todos os jogos sem limites!');
+    } catch (err) {
+        alert('Erro ao processar pagamento. Tente novamente.\n' + err.message);
+    }
+}
+
+function openPayment() {
+    // If already in player, show paywall early with payment form
+    const paywall = document.getElementById('paywallOverlay');
+    if (paywall) {
+        paywall.classList.add('active');
+        // Pre-fill email
+        const payEmail = document.getElementById('payEmail');
+        if (payEmail && AuthModule.currentUser) {
+            payEmail.value = AuthModule.currentUser.email;
+        }
+        // Pause video while deciding
+        document.getElementById('videoPlayer').pause();
     }
 }
 
@@ -357,27 +566,26 @@ async function handleRegister(e) {
 AuthModule.onLogin = (user, data) => {
     closeLogin();
     closeRegister();
-    document.getElementById('navCta').innerHTML = `
-    <span style="color:var(--text-secondary);font-size:.85rem">⚽ ${data.name || user.email}</span>
-    ${data.premium ? '<span class="badge-live" style="background:rgba(255,214,0,.15);border-color:rgba(255,214,0,.3);color:#ffd600"><span class="dot" style="background:#ffd600"></span> PREMIUM</span>' : ''}
-    <a href="#" class="btn btn-secondary" onclick="AuthModule.logout()">Sair</a>
-  `;
+    document.getElementById('navCta').innerHTML =
+        '<span style="color:var(--text-secondary);font-size:.85rem">⚽ ' + (data.name || user.email) + '</span>' +
+        (data.premium ? '<span class="badge-live" style="background:rgba(255,214,0,.15);border-color:rgba(255,214,0,.3);color:#ffd600"><span class="dot" style="background:#ffd600"></span> PREMIUM</span>' : '') +
+        '<a href="#" class="btn btn-secondary" onclick="AuthModule.logout()">Sair</a>';
 
-    // If paywall is active and user is premium, remove it
+    // If premium and paywall is active, remove it
     if (data.premium && document.getElementById('paywallOverlay').classList.contains('active')) {
         document.getElementById('paywallOverlay').classList.remove('active');
         document.getElementById('timerBar').style.display = 'none';
-        document.getElementById('timerBadge').innerHTML = '<span style="color:var(--accent-green)">✅ Premium</span>';
+        const badge = document.getElementById('timerBadgeInline');
+        if (badge) badge.innerHTML = '<span style="color:var(--accent-green)">&#10004; Premium</span>';
         clearInterval(paywallTimer);
         document.getElementById('videoPlayer').play().catch(() => { });
     }
 };
 
 AuthModule.onLogout = () => {
-    document.getElementById('navCta').innerHTML = `
-    <a href="#" class="btn btn-secondary" onclick="openLogin()">Entrar</a>
-    <a href="#" class="btn btn-primary" onclick="openRegister()">Assinar</a>
-  `;
+    document.getElementById('navCta').innerHTML =
+        '<a href="#" class="btn btn-secondary" onclick="openLogin()">Entrar</a>' +
+        '<a href="#" class="btn btn-primary" onclick="openRegister()">Assinar</a>';
 };
 
 // ===== MODAL OVERLAY CLICK =====
@@ -397,7 +605,6 @@ try {
         }
     });
 } catch (e) {
-    // If Firebase not configured, show samples
     renderMatches(sampleChannels);
 }
 
