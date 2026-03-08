@@ -278,16 +278,48 @@ async function deleteChannel(id) {
 // ===== DELETE ALL =====
 async function deleteAllChannels() {
     if (!confirm('⚠️ ATENÇÃO: Isso vai excluir TODOS os canais. Tem certeza?')) return;
+    if (!confirm('🗑️ CONFIRMAÇÃO FINAL: Todos os canais serão removidos permanentemente. Continuar?')) return;
+
     try {
-        const channels = await DataModule.getChannels();
-        for (const ch of channels) {
-            await DataModule.deleteChannel(ch.id);
+        const statusEl = document.getElementById('syncStatus');
+        if (statusEl) statusEl.textContent = 'Excluindo canais...';
+
+        // Get ALL channels directly from Firestore
+        const snapshot = await db.collection('channels').get();
+
+        if (snapshot.empty) {
+            alert('Nenhum canal para excluir.');
+            return;
         }
-        alert('🗑️ Todos os canais foram excluídos!');
+
+        const total = snapshot.size;
+        let deleted = 0;
+
+        // Delete in batches of 500 (Firestore limit)
+        const batchSize = 500;
+        const docs = snapshot.docs;
+
+        for (let i = 0; i < docs.length; i += batchSize) {
+            const batch = db.batch();
+            const chunk = docs.slice(i, i + batchSize);
+
+            chunk.forEach(doc => {
+                batch.delete(doc.ref);
+            });
+
+            await batch.commit();
+            deleted += chunk.length;
+
+            if (statusEl) statusEl.textContent = `Excluindo... ${deleted}/${total}`;
+        }
+
+        if (statusEl) statusEl.textContent = `✅ ${total} canais excluidos!`;
+        alert(`🗑️ ${total} canais foram excluídos com sucesso!`);
         loadChannels();
         loadStats();
     } catch (err) {
-        alert('Erro: ' + err.message);
+        console.error('Erro ao excluir:', err);
+        alert('Erro ao excluir canais: ' + err.message);
     }
 }
 

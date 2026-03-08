@@ -94,6 +94,89 @@ function formatMatchDate(ch) {
     return '';
 }
 
+// ===== TEAM LOGOS =====
+function getTeamLogo(teamName) {
+    const n = teamName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // CDN base for team logos
+    const LOGOS = {
+        // Brasileirão Série A
+        'flamengo': 'https://logodetimes.com/times/flamengo/logo-flamengo-256.png',
+        'palmeiras': 'https://logodetimes.com/times/palmeiras/logo-palmeiras-256.png',
+        'corinthians': 'https://logodetimes.com/times/corinthians/logo-corinthians-256.png',
+        'sao paulo': 'https://logodetimes.com/times/sao-paulo/logo-sao-paulo-256.png',
+        'santos': 'https://logodetimes.com/times/santos/logo-santos-256.png',
+        'gremio': 'https://logodetimes.com/times/gremio/logo-gremio-256.png',
+        'internacional': 'https://logodetimes.com/times/internacional/logo-internacional-256.png',
+        'atletico-mg': 'https://logodetimes.com/times/atletico-mineiro/logo-atletico-mineiro-256.png',
+        'atletico mineiro': 'https://logodetimes.com/times/atletico-mineiro/logo-atletico-mineiro-256.png',
+        'cruzeiro': 'https://logodetimes.com/times/cruzeiro/logo-cruzeiro-256.png',
+        'fluminense': 'https://logodetimes.com/times/fluminense/logo-fluminense-256.png',
+        'botafogo': 'https://logodetimes.com/times/botafogo/logo-botafogo-256.png',
+        'vasco': 'https://logodetimes.com/times/vasco-da-gama/logo-vasco-da-gama-256.png',
+        'bahia': 'https://logodetimes.com/times/bahia/logo-bahia-256.png',
+        'fortaleza': 'https://logodetimes.com/times/fortaleza/logo-fortaleza-256.png',
+        'athletico': 'https://logodetimes.com/times/athletico-paranaense/logo-athletico-paranaense-256.png',
+        'goias': 'https://logodetimes.com/times/goias/logo-goias-256.png',
+        'cuiaba': 'https://logodetimes.com/times/cuiaba/logo-cuiaba-256.png',
+        'bragantino': 'https://logodetimes.com/times/red-bull-bragantino/logo-red-bull-bragantino-256.png',
+        'vitoria': 'https://logodetimes.com/times/vitoria/logo-vitoria-256.png',
+        'sport': 'https://logodetimes.com/times/sport/logo-sport-256.png',
+        'ceara': 'https://logodetimes.com/times/ceara/logo-ceara-256.png',
+        'atletico-go': 'https://logodetimes.com/times/atletico-goianiense/logo-atletico-goianiense-256.png',
+        'atletico goianiense': 'https://logodetimes.com/times/atletico-goianiense/logo-atletico-goianiense-256.png',
+        'bangu': 'https://logodetimes.com/times/bangu/logo-bangu-256.png',
+        'coritiba': 'https://logodetimes.com/times/coritiba/logo-coritiba-256.png',
+        'america-mg': 'https://logodetimes.com/times/america-mineiro/logo-america-mineiro-256.png',
+        'juventude': 'https://logodetimes.com/times/juventude/logo-juventude-256.png',
+        'chapecoense': 'https://logodetimes.com/times/chapecoense/logo-chapecoense-256.png',
+        // Premier League
+        'manchester city': 'https://logodetimes.com/times/manchester-city/logo-manchester-city-256.png',
+        'liverpool': 'https://logodetimes.com/times/liverpool/logo-liverpool-256.png',
+        'arsenal': 'https://logodetimes.com/times/arsenal/logo-arsenal-256.png',
+        'chelsea': 'https://logodetimes.com/times/chelsea/logo-chelsea-256.png',
+        'manchester united': 'https://logodetimes.com/times/manchester-united/logo-manchester-united-256.png',
+        'tottenham': 'https://logodetimes.com/times/tottenham-hotspur/logo-tottenham-hotspur-256.png',
+        'newcastle': 'https://logodetimes.com/times/newcastle-united/logo-newcastle-united-256.png',
+        'aston villa': 'https://logodetimes.com/times/aston-villa/logo-aston-villa-256.png',
+        // La Liga
+        'real madrid': 'https://logodetimes.com/times/real-madrid/logo-real-madrid-256.png',
+        'barcelona': 'https://logodetimes.com/times/barcelona/logo-barcelona-256.png',
+        'atletico de madrid': 'https://logodetimes.com/times/atletico-de-madrid/logo-atletico-de-madrid-256.png',
+        'sevilla': 'https://logodetimes.com/times/sevilla/logo-sevilla-256.png',
+        'athletic': 'https://logodetimes.com/times/athletic-bilbao/logo-athletic-bilbao-256.png',
+        'athletic bilbao': 'https://logodetimes.com/times/athletic-bilbao/logo-athletic-bilbao-256.png',
+        // Serie A (Italy)
+        'juventus': 'https://logodetimes.com/times/juventus/logo-juventus-256.png',
+        'milan': 'https://logodetimes.com/times/milan/logo-milan-256.png',
+        'inter de milao': 'https://logodetimes.com/times/internazionale/logo-internazionale-256.png',
+        'napoli': 'https://logodetimes.com/times/napoli/logo-napoli-256.png',
+        'roma': 'https://logodetimes.com/times/roma/logo-roma-256.png',
+        'lazio': 'https://logodetimes.com/times/lazio/logo-lazio-256.png',
+        'pisa': 'https://logodetimes.com/times/pisa/logo-pisa-256.png',
+        // Bundesliga
+        'bayern': 'https://logodetimes.com/times/bayern-de-munique/logo-bayern-de-munique-256.png',
+        'borussia dortmund': 'https://logodetimes.com/times/borussia-dortmund/logo-borussia-dortmund-256.png',
+        // Ligue 1
+        'psg': 'https://logodetimes.com/times/psg/logo-psg-256.png',
+        'paris': 'https://logodetimes.com/times/psg/logo-psg-256.png',
+        // Portuguese
+        'benfica': 'https://logodetimes.com/times/benfica/logo-benfica-256.png',
+        'porto': 'https://logodetimes.com/times/porto/logo-porto-256.png',
+        'sporting': 'https://logodetimes.com/times/sporting/logo-sporting-256.png',
+        // Other
+        'wrexham': 'https://upload.wikimedia.org/wikipedia/en/thumb/5/55/Wrexham_AFC.svg/180px-Wrexham_AFC.svg.png',
+    };
+
+    // Try exact match
+    for (const [key, url] of Object.entries(LOGOS)) {
+        if (n.includes(key)) return url;
+    }
+
+    // Fallback: generic football icon
+    return 'https://cdn-icons-png.flaticon.com/128/1165/1165187.png';
+}
+
 // ===== RENDER MATCHES AS LIST =====
 function renderMatches(channels) {
     const list = document.getElementById('matchesList');
@@ -136,16 +219,19 @@ function renderMatches(channels) {
             const statusText = ch.status === 'live' ? 'AO VIVO' : ch.status === 'scheduled' ? 'Em Breve' : 'Encerrado';
             const statusDot = ch.status === 'live' ? '🔴' : ch.status === 'scheduled' ? '🟡' : '⚫';
 
+            const logoHome = getTeamLogo(ch.home);
+            const logoAway = getTeamLogo(ch.away);
+
             html += '<div class="match-item ' + statusClass + '" onclick="openPlayer(\'' + (ch.url || '') + '\', \'' + ch.home + ' x ' + ch.away + '\')">';
             html += '  <div class="match-item-left">';
             html += '    <div class="match-item-teams">';
-            html += '      <span class="match-team-emoji">' + (ch.emojiHome || '⚽') + '</span>';
+            html += '      <img class="team-logo" src="' + logoHome + '" alt="' + ch.home + '" onerror="this.src=\'https://cdn-icons-png.flaticon.com/128/1165/1165187.png\'">';
             html += '      <div class="match-team-names">';
             html += '        <span class="team-home">' + ch.home + '</span>';
             html += '        <span class="team-vs">vs</span>';
             html += '        <span class="team-away">' + ch.away + '</span>';
             html += '      </div>';
-            html += '      <span class="match-team-emoji">' + (ch.emojiAway || '⚽') + '</span>';
+            html += '      <img class="team-logo" src="' + logoAway + '" alt="' + ch.away + '" onerror="this.src=\'https://cdn-icons-png.flaticon.com/128/1165/1165187.png\'">';
             html += '    </div>';
             html += '  </div>';
             html += '  <div class="match-item-center">';

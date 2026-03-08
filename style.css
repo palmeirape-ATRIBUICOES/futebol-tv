@@ -1186,9 +1186,16 @@ button {
     gap: 10px;
 }
 
-.match-team-emoji {
-    font-size: 1.3rem;
+.team-logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: contain;
     flex-shrink: 0;
+    background: rgba(255, 255, 255, .06);
+    padding: 3px;
+    border: 1px solid rgba(255, 255, 255, .08);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .2);
 }
 
 .match-team-names {
