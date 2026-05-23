@@ -97,19 +97,128 @@ app.get('/proxy', async (req, res) => {
         }
 
         // For segments (TS, etc), pipe directly
-        const headers = {
+        const resHeaders = {
             'Content-Type': ct,
             'Cache-Control': 'public, max-age=5',
             'Access-Control-Allow-Origin': '*',
         };
-        if (cl) headers['Content-Length'] = cl;
+        if (cl) resHeaders['Content-Length'] = cl;
 
-        res.set(headers);
+        res.set(resHeaders);
         upstream.body.pipe(res);
 
     } catch (err) {
         console.error(`❌ Proxy error:`, err.message);
         res.status(502).send('Proxy error: ' + err.message);
+    }
+});
+
+// ===== STREAM PROXY INTELIGENTE =====
+// Uso: /stream-proxy?pageUrl=https://links2.futemais.eu/canalapps.php?id=13801
+// Extrai token fresco em tempo real — resolve o erro 403 do token expirado
+app.get('/stream-proxy', async (req, res) => {
+    let pageUrl = req.query.pageUrl;
+    if (!pageUrl) return res.status(400).json({ error: 'Missing pageUrl parameter' });
+
+    try { pageUrl = decodeURIComponent(pageUrl); } catch(e) {}
+    console.log(`🎯 Stream-Proxy: buscando token para ${pageUrl.substring(0, 80)}`);
+
+    try {
+        // PASSO 1: Buscar a página do player
+        const playerRes = await fetch(pageUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+                'Referer': 'https://apk.futemais.eu/',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'pt-BR,pt;q=0.9'
+            }
+        });
+
+        if (!playerRes.ok) {
+            return res.status(502).json({ error: `Player page returned ${playerRes.status}` });
+        }
+
+        const playerHtml = await playerRes.text();
+
+        // PASSO 2: Tentar M3U8 direto na página do player
+        const directM3u8 = playerHtml.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
+        if (directM3u8.length > 0) {
+            const freshUrl = directM3u8[0].replace(/\\+/g, '');
+            console.log(`✅ M3U8 direto: ${freshUrl.substring(0, 80)}`);
+            return res.redirect(`/proxy?url=${encodeURIComponent(freshUrl)}`);
+        }
+
+        // PASSO 3: Procurar changeChannel com URL de opcao
+        let opcaoUrl = '';
+        const changeChannels = playerHtml.match(/changeChannel\(['"]([^'"]+)['"]\)/gi) || [];
+        for (const match of changeChannels) {
+            const m = match.match(/changeChannel\(['"]([^'"]+)['"]\)/i);
+            if (m && (m[1].includes('opcao') || m[1].includes('canais') || m[1].includes('futemais'))) {
+                opcaoUrl = m[1];
+                break;
+            }
+        }
+
+        // Fallback: src de iframe
+        if (!opcaoUrl) {
+            const iframeSrcs = playerHtml.match(/src=['"]([^'"]*(?:opcao|canais)[^'"]*)['"]/gi) || [];
+            for (const s of iframeSrcs) {
+                const srcM = s.match(/src=['"]([^'"]+)['"]/i);
+                if (srcM && !srcM[1].includes('google') && !srcM[1].includes('ads')) {
+                    opcaoUrl = srcM[1].startsWith('//') ? 'https:' + srcM[1] : srcM[1];
+                    break;
+                }
+            }
+        }
+
+        if (!opcaoUrl) {
+            return res.status(502).json({ error: 'No stream option found in player page' });
+        }
+
+        console.log(`📺 Seguindo opcao: ${opcaoUrl.substring(0, 80)}`);
+
+        // PASSO 4: Buscar a página da opção com Referer correto
+        const opcaoOrigin = (() => { try { return new URL(pageUrl).origin; } catch(e) { return 'https://links2.futemais.eu'; } })();
+        const opcaoRes = await fetch(opcaoUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': pageUrl,
+                'Origin': opcaoOrigin,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            }
+        });
+
+        if (!opcaoRes.ok) {
+            return res.status(502).json({ error: `Opcao page returned ${opcaoRes.status}` });
+        }
+
+        const opcaoHtml = await opcaoRes.text();
+
+        // PASSO 5: Extrair M3U8 com token fresco
+        const m3u8s = opcaoHtml.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
+        if (m3u8s.length > 0) {
+            const freshUrl = m3u8s[0].replace(/\\+/g, '');
+            console.log(`✅ M3U8 fresco: ${freshUrl.substring(0, 80)}`);
+            return res.redirect(`/proxy?url=${encodeURIComponent(freshUrl)}`);
+        }
+
+        // Procurar via source: config do Clappr/HLS
+        const sourceConfigs = opcaoHtml.match(/source\s*[:=]\s*['"]([^'"]+\.m3u8[^'"]*)/gi) || [];
+        if (sourceConfigs.length > 0) {
+            const srcMatch = sourceConfigs[0].match(/(https?:\/\/[^'"]+)/);
+            if (srcMatch) {
+                const freshUrl = srcMatch[1];
+                console.log(`✅ Clappr source fresco: ${freshUrl.substring(0, 80)}`);
+                return res.redirect(`/proxy?url=${encodeURIComponent(freshUrl)}`);
+            }
+        }
+
+        console.error('❌ Nenhum M3U8 encontrado na página da opção');
+        res.status(502).json({ error: 'No M3U8 stream found in option page' });
+
+    } catch (err) {
+        console.error(`❌ Stream-Proxy error:`, err.message);
+        res.status(502).json({ error: 'Stream proxy error: ' + err.message });
     }
 });
 

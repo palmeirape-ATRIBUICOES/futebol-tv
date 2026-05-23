@@ -50,8 +50,13 @@ document.addEventListener('DOMContentLoaded', () => {
     proxyUrl = localStorage.getItem('proxyUrl') || window.location.origin;
     if (proxyUrlInput) proxyUrlInput.value = proxyUrl;
 
-    // Load channels from Firebase
-    loadChannels();
+    // Aguarda autenticação anônima antes de carregar canais
+    // Isso garante que as Firestore Security Rules sejam satisfeitas
+    auth.onAuthStateChanged((user) => {
+        if (user) {
+            loadChannels();
+        }
+    });
 
     // Setup event listeners
     setupEvents();
@@ -138,7 +143,6 @@ function renderAdminChannels(channels) {
 
 // ===== PLAY CHANNEL =====
 window.playChannel = async function(channelId) {
-    // Get channel data from Firebase
     try {
         const doc = await db.collection(CHANNELS_COLLECTION).doc(channelId).get();
         if (!doc.exists) {
@@ -155,22 +159,41 @@ window.playChannel = async function(channelId) {
         playerLoading.style.display = 'flex';
         video.classList.add('active');
         playerOverlay.classList.add('active');
-        nowPlaying.textContent = channel.name;
+        // Nome: usa home x away se for jogo sincronizado, senão usa 'name'
+        nowPlaying.textContent = channel.home
+            ? `${channel.home} x ${channel.away}`
+            : (channel.name || 'Ao Vivo');
 
         // Mark active card
         document.querySelectorAll('.channel-card').forEach(card => {
             card.classList.toggle('active', card.dataset.id === channelId);
         });
 
-        // Build stream URL
-        let streamUrl = channel.url;
+        // Estratégia de stream:
+        // 1. Se tem streamPageUrl (URL do player do site fonte), usa /stream-proxy para pegar token fresco
+        // 2. Se tem url direta (.m3u8), roteia pelo proxy normal
+        // 3. Fallback: tenta direto
+        const streamPageUrl = channel.streamPageUrl;
+        const directUrl = channel.url;
 
-        // If proxy is configured, route through it
-        if (proxyUrl) {
-            streamUrl = `${proxyUrl}/proxy?url=${encodeURIComponent(channel.url)}`;
+        let streamUrl;
+
+        if (streamPageUrl && streamPageUrl.includes('futemais') && proxyUrl) {
+            // Usa o stream-proxy que busca token fresco em tempo real
+            streamUrl = `${proxyUrl}/stream-proxy?pageUrl=${encodeURIComponent(streamPageUrl)}`;
+        } else if (directUrl && directUrl.includes('.m3u8') && proxyUrl) {
+            // URL direta, roteia pelo proxy de CORS
+            streamUrl = `${proxyUrl}/proxy?url=${encodeURIComponent(directUrl)}`;
+        } else if (directUrl && directUrl.includes('.m3u8')) {
+            streamUrl = directUrl;
+        } else if (streamPageUrl && proxyUrl) {
+            streamUrl = `${proxyUrl}/stream-proxy?pageUrl=${encodeURIComponent(streamPageUrl)}`;
+        } else {
+            showError('Canal sem URL de stream configurada.');
+            return;
         }
 
-        // Start playback
+        console.log('[Player] Stream URL:', streamUrl);
         startStream(streamUrl);
 
     } catch (err) {

@@ -12,3 +12,9 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
+
+// Autentica anonimamente para passar nas Firestore Security Rules.
+// Os canais são públicos (leitura), mas as regras exigem auth != null.
+auth.signInAnonymously().catch(err => {
+    console.warn('[Firebase] Login anônimo falhou:', err.message);
+});
