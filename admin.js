@@ -58,6 +58,14 @@ function clearForm() {
     document.getElementById('chEmojiHome').value = '';
     document.getElementById('chEmojiAway').value = '';
     document.getElementById('chEditId').value = '';
+    document.getElementById('chIptvUrl').value = '';
+    document.getElementById('chIptvChannelField').value = '';
+    const iptvSelect = document.getElementById('chIptvSelect');
+    if (iptvSelect) iptvSelect.value = '';
+    const iptvLabel = document.getElementById('chIptvChannelName');
+    if (iptvLabel) { iptvLabel.style.display = 'none'; iptvLabel.textContent = ''; }
+    const iptvSearch = document.getElementById('iptvSearch');
+    if (iptvSearch) iptvSearch.value = '';
     document.getElementById('formTitle').textContent = 'Adicionar Novo Canal';
 }
 
@@ -65,11 +73,17 @@ function clearForm() {
 async function saveChannel(e) {
     e.preventDefault();
 
+    const iptvUrl = document.getElementById('chIptvUrl').value || '';
+    const iptvChannel = document.getElementById('chIptvChannelField').value || '';
+    const manualUrl = document.getElementById('chUrl').value || '';
+
     const data = {
         home: document.getElementById('chHome').value,
         away: document.getElementById('chAway').value,
         league: document.getElementById('chLeague').value,
-        url: document.getElementById('chUrl').value,
+        url: manualUrl,
+        iptvUrl: iptvUrl || manualUrl,
+        iptvChannel: iptvChannel,
         scoreHome: parseInt(document.getElementById('chScoreHome').value) || 0,
         scoreAway: parseInt(document.getElementById('chScoreAway').value) || 0,
         matchDate: document.getElementById('chMatchDate').value || '',
@@ -212,14 +226,19 @@ function renderChannelRows(channels) {
         return;
     }
 
-    list.innerHTML = channels.map(ch => `
+    list.innerHTML = channels.map(ch => {
+        const hasIptv = ch.iptvUrl || ch.url;
+        const iptvBadge = ch.iptvChannel
+            ? `<span style="font-size:.7rem;background:rgba(0,230,118,.1);border:1px solid rgba(0,230,118,.2);color:#00e676;padding:2px 8px;border-radius:6px;margin-left:4px">📡 ${ch.iptvChannel}</span>`
+            : (hasIptv ? `<span style="font-size:.7rem;background:rgba(0,230,118,.1);border:1px solid rgba(0,230,118,.2);color:#00e676;padding:2px 8px;border-radius:6px;margin-left:4px">✅ Link</span>` : `<span style="font-size:.7rem;background:rgba(255,59,48,.1);border:1px solid rgba(255,59,48,.2);color:#ff3b30;padding:2px 8px;border-radius:6px;margin-left:4px">⚠️ Sem Link</span>`);
+        return `
     <div class="channel-row">
       <span>
         <span class="channel-status ${ch.status === 'live' ? 'live' : 'offline'}">
           ${ch.status === 'live' ? '🔴 Ao Vivo' : ch.status === 'scheduled' ? '📅 Agendado' : '⏹ Encerrado'}
         </span>
       </span>
-      <span>${ch.emojiHome || ''} ${ch.home} x ${ch.away} ${ch.emojiAway || ''}</span>
+      <span>${ch.emojiHome || ''} ${ch.home} x ${ch.away} ${ch.emojiAway || ''} ${iptvBadge}</span>
       <span style="color:var(--text-secondary)">${ch.league || '-'}</span>
       <span style="font-weight:700">${ch.scoreHome ?? 0} x ${ch.scoreAway ?? 0}</span>
       <span style="color:var(--accent-green)">${ch.time || '-'}</span>
@@ -228,7 +247,7 @@ function renderChannelRows(channels) {
         <button class="btn-delete" onclick="deleteChannel('${ch.id}')" title="Excluir">🗑️</button>
       </div>
     </div>
-  `).join('');
+  `;}).join('');
 }
 
 // ===== EDIT CHANNEL =====
@@ -252,6 +271,21 @@ async function editChannel(id) {
         document.getElementById('chEmojiHome').value = ch.emojiHome || '';
         document.getElementById('chEmojiAway').value = ch.emojiAway || '';
         document.getElementById('chEditId').value = id;
+        document.getElementById('chIptvUrl').value = ch.iptvUrl || '';
+        document.getElementById('chIptvChannelField').value = ch.iptvChannel || '';
+
+        // Show IPTV channel name if set
+        const iptvLabel = document.getElementById('chIptvChannelName');
+        if (iptvLabel && ch.iptvChannel) {
+            iptvLabel.textContent = '📡 Canal IPTV: ' + ch.iptvChannel;
+            iptvLabel.style.display = 'block';
+        }
+
+        // Try to select the matching IPTV channel in dropdown
+        const iptvSelect = document.getElementById('chIptvSelect');
+        if (iptvSelect && ch.iptvUrl) {
+            iptvSelect.value = ch.iptvUrl;
+        }
         document.getElementById('formTitle').textContent = 'Editar Canal';
 
         const form = document.getElementById('channelForm');
@@ -374,13 +408,19 @@ async function revokeAccess(uid) {
     }
 }
 
-// ===== AUTO-SYNC FROM SOURCE SITE =====
-const SOURCE_URL = 'https://howtoblogging.info/?st=index';
-const CORS_PROXIES = [
-    'https://api.allorigins.win/raw?url=',
-    'https://corsproxy.io/?',
-    'https://api.codetabs.com/v1/proxy?quest='
+// ===== IPTV XTREAM CODES INTEGRATION =====
+// Default IPTV panel config (can be changed in admin UI)
+let iptvConfig = {
+    server: 'http://horizonmult.fun',
+    username: 'thpalmeira',
+    password: '1643363hdgsje'
+};
+
+// Sports category IDs to sync
+const SPORTS_CATEGORY_IDS = [
+    57, 73, 74, 75, 59, 3986, 61, 60, 63, 3987, 62, 1026, 58, 65, 4737, 4733
 ];
+
 let autoSyncInterval = null;
 let syncInProgress = false;
 
@@ -399,216 +439,65 @@ function updateLastSyncTime() {
     }
 }
 
-async function fetchWithProxy(url) {
-    for (let i = 0; i < CORS_PROXIES.length; i++) {
-        try {
-            const proxyUrl = CORS_PROXIES[i] + encodeURIComponent(url);
-            const response = await fetch(proxyUrl, {
-                signal: AbortSignal.timeout(15000)
-            });
-            if (response.ok) {
-                return await response.text();
-            }
-        } catch (e) {
-            console.warn('Proxy ' + i + ' falhou:', e.message);
-        }
-    }
-    throw new Error('Todos os proxies falharam. Tente novamente.');
+function xtreamUrl(action) {
+    return `${iptvConfig.server}/player_api.php?username=${iptvConfig.username}&password=${iptvConfig.password}&action=${action}`;
 }
 
-function parseGamesFromHtml(html) {
-    const parser = new DOMParser();
+function buildStreamUrl(streamId) {
+    return `${iptvConfig.server}/${iptvConfig.username}/${iptvConfig.password}/${streamId}.ts`;
+}
 
-    // CRITICAL: Remove all script and style tags BEFORE parsing
-    let cleanHtml = html.replace(/<script[\s\S]*?<\/script>/gi, '');
-    cleanHtml = cleanHtml.replace(/<style[\s\S]*?<\/style>/gi, '');
-    cleanHtml = cleanHtml.replace(/<noscript[\s\S]*?<\/noscript>/gi, '');
-    cleanHtml = cleanHtml.replace(/<!--[\s\S]*?-->/g, '');
+const CORS_PROXIES = [
+    'https://api.allorigins.win/raw?url=',
+    'https://corsproxy.io/?',
+    'https://api.codetabs.com/v1/proxy?quest='
+];
 
-    const doc = parser.parseFromString(cleanHtml, 'text/html');
-    const games = [];
-
-    // Blacklist of junk keywords that are NOT team names
-    const JUNK_KEYWORDS = [
-        'function', 'var ', 'const ', 'let ', 'push', 'getElementById',
-        'display', 'width', 'height', 'margin', 'padding', 'border',
-        'script', 'style', 'googletag', 'adsbygoogle', 'analytics',
-        'Hasync', 'Histats', 'cookie', 'window.', 'document.',
-        'innerHTML', 'className', 'addEventListener', '$.', 'jQuery',
-        '{', '}', '()', '=>', 'return', 'async', 'await', 'import',
-        'console.', 'setTimeout', 'setInterval', 'onclick', 'href=',
-        'src=', 'div.', 'span.', 'px;', 'em;', 'rem;', 'block;',
-        'inline', 'Baixar', 'Atualizar', 'Compartilhar', 'Whatsapp',
-        'APP', 'FUTEBOL DA HORA', 'http', 'www.', '.com', '.net',
-        '.js', '.css', '.php', '.html', 'Copyright', 'Privacy',
-        'Scholarship', 'Australia', 'Tax', 'Finance', 'Insurance',
-        'Google', 'Cloud', 'Blog', 'Article', 'Read more', 'Leia mais'
-    ];
-
-    function isJunk(text) {
-        const lower = text.toLowerCase();
-        return JUNK_KEYWORDS.some(keyword => lower.includes(keyword.toLowerCase()));
+async function fetchXtreamApi(action) {
+    const url = xtreamUrl(action);
+    try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+        if (res.ok) return await res.json();
+    } catch (e) {
+        console.warn('Direct fetch failed, trying proxies...');
     }
-
-    function isValidTeamName(name) {
-        if (!name || name.length < 2 || name.length > 35) return false;
-        if (isJunk(name)) return false;
-        // Must contain at least one letter
-        if (!/[a-zA-ZÀ-ú]/.test(name)) return false;
-        // Should not be mostly numbers/symbols
-        const letters = name.replace(/[^a-zA-ZÀ-ú]/g, '');
-        if (letters.length < name.length * 0.4) return false;
-        // No code-like characters
-        if (/[{}();=><]/.test(name)) return false;
-        return true;
-    }
-
-    // Strategy 1: Find game links (anchor tags with game data)
-    const links = doc.querySelectorAll('a[href*="howtoblogging"], a[href*="?id="]');
-
-    links.forEach(link => {
-        const text = link.textContent.trim();
-        if (!text || text.length < 5 || isJunk(text)) return;
-
-        // Clean text: remove dots pattern and normalize spaces
-        const cleanText = text.replace(/\.\s*\.\s*\./g, '').replace(/\s+/g, ' ').trim();
-        if (cleanText.length < 5 || isJunk(cleanText)) return;
-
-        // Split by multiple spaces (site uses whitespace to separate fields)
-        const parts = cleanText.split(/\s{2,}/).map(p => p.trim()).filter(p => p.length > 0);
-
-        if (parts.length >= 3) {
-            const home = parts[0].trim();
-            const away = parts[parts.length - 1].trim();
-
-            // Validate both team names
-            if (!isValidTeamName(home) || !isValidTeamName(away)) return;
-
-            let league = '';
-            let matchTime = '';
-
-            for (let i = 1; i < parts.length - 1; i++) {
-                const part = parts[i].trim();
-                if (/^\d{1,2}:\d{2}$/.test(part)) {
-                    matchTime = part;
-                } else if (part.length > 2 && !isJunk(part)) {
-                    league = part;
-                }
+    for (const proxy of CORS_PROXIES) {
+        try {
+            const proxyUrl = proxy + encodeURIComponent(url);
+            const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+            if (res.ok) {
+                const text = await res.text();
+                return JSON.parse(text);
             }
-
-            const streamUrl = link.getAttribute('href') || '';
-
-            games.push({
-                home: home,
-                away: away,
-                league: league || 'Campeonato',
-                matchTime: matchTime || '',
-                matchDate: new Date().toISOString().split('T')[0],
-                status: 'live',
-                streamPageUrl: streamUrl,
-                url: '',
-                scoreHome: 0,
-                scoreAway: 0,
-                time: matchTime || 'Ao Vivo',
-                emojiHome: getTeamEmoji(home),
-                emojiAway: getTeamEmoji(away),
-                viewers: Math.floor(Math.random() * 20000) + 1000,
-                syncedAt: new Date().toISOString()
-            });
-        }
-    });
-
-    // Strategy 2: If link parsing found few/no results, try text parsing
-    if (games.length < 3) {
-        // Get only visible text, avoiding scripts/styles
-        const allElements = doc.querySelectorAll('body *:not(script):not(style):not(noscript)');
-        const textLines = [];
-        allElements.forEach(el => {
-            if (el.children.length === 0 || el.tagName === 'A') {
-                const txt = el.textContent.trim();
-                if (txt && txt.length > 1 && txt.length < 50 && !isJunk(txt)) {
-                    textLines.push(txt);
-                }
-            }
-        });
-
-        let currentLeague = '';
-        let currentTime = '';
-        let teams = [];
-
-        for (const line of textLines) {
-            // Time pattern
-            const timeMatch = line.match(/^(\d{1,2}:\d{2})$/);
-            if (timeMatch) {
-                currentTime = timeMatch[1];
-                continue;
-            }
-
-            // League pattern
-            if (line.match(/^(Copa|Campeonato|Brasileiro|Serie|Premier|La Liga|Libertadores|Champions|Paulista|Carioca|Goiano|Baiano|Italiano|Espanhol|Frances|Alemao|UEFA|Sul-Americana|Recopa|Supercopa)/i) ||
-                line.match(/^.*(League|Cup|Liga|Division).*$/i)) {
-                currentLeague = line;
-                continue;
-            }
-
-            // Team name candidate
-            if (isValidTeamName(line) && !line.match(/^\d/)) {
-                // Avoid duplicates
-                const isDuplicate = games.some(g => g.home === line || g.away === line);
-                if (!isDuplicate) {
-                    teams.push(line);
-                }
-
-                if (teams.length === 2) {
-                    games.push({
-                        home: teams[0],
-                        away: teams[1],
-                        league: currentLeague || 'Campeonato',
-                        matchTime: currentTime || '',
-                        matchDate: new Date().toISOString().split('T')[0],
-                        status: 'live',
-                        streamPageUrl: '',
-                        url: '',
-                        scoreHome: 0,
-                        scoreAway: 0,
-                        time: currentTime || 'Ao Vivo',
-                        emojiHome: getTeamEmoji(teams[0]),
-                        emojiAway: getTeamEmoji(teams[1]),
-                        viewers: Math.floor(Math.random() * 20000) + 1000,
-                        syncedAt: new Date().toISOString()
-                    });
-                    teams = [];
-                    currentTime = '';
-                }
-            }
+        } catch (e) {
+            console.warn('Proxy failed:', e.message);
         }
     }
+    throw new Error('Nao foi possivel conectar ao painel IPTV.');
+}
 
-    console.log('Parser encontrou', games.length, 'jogos validos');
-    return games;
+function cleanChannelName(name) {
+    return name.replace(/[♦️⭐⚽️⛳❌♠️]/g, '').replace(/\s*\[ALT\]\s*/gi, ' [ALT]').trim();
+}
+
+function getCategoryLabel(catName) {
+    return catName.replace(/[♦️⭐⚽️⛳❌♠️|]/g, '').trim();
 }
 
 function getTeamEmoji(team) {
     const name = team.toLowerCase();
-    // Brazilian teams
-    if (name.includes('flamengo') || name.includes('internacional') || name.includes('inter')) return '🔴';
-    if (name.includes('palmeiras') || name.includes('goias')) return '🟢';
-    if (name.includes('corinthians') || name.includes('botafogo') || name.includes('vasco')) return '⚫';
-    if (name.includes('gremio') || name.includes('cruzeiro')) return '🔵';
-    if (name.includes('sao paulo') || name.includes('santos')) return '⚪';
-    if (name.includes('fluminense')) return '🟤';
-    if (name.includes('bahia') || name.includes('vitoria')) return '🔴';
-    if (name.includes('atletico')) return '⚫';
-    if (name.includes('bangu')) return '🔴';
-    // European
-    if (name.includes('real madrid') || name.includes('juventus')) return '⚪';
-    if (name.includes('barcelona') || name.includes('chelsea')) return '🔵';
-    if (name.includes('manchester city') || name.includes('city')) return '🔵';
-    if (name.includes('liverpool') || name.includes('milan') || name.includes('arsenal')) return '🔴';
-    if (name.includes('newcastle') || name.includes('pisa')) return '⚫';
-    if (name.includes('athletic')) return '🔴';
-    if (name.includes('wrexham')) return '🔴';
-    return '⚽';
+    if (name.includes('premiere')) return '🏆';
+    if (name.includes('espn')) return '📺';
+    if (name.includes('sportv')) return '📺';
+    if (name.includes('dazn')) return '📡';
+    if (name.includes('disney')) return '✨';
+    if (name.includes('max') || name.includes('hbo')) return '🎬';
+    if (name.includes('paramount')) return '⭐';
+    if (name.includes('amazon') || name.includes('prime')) return '📦';
+    if (name.includes('caze') || name.includes('cazé')) return '🎙️';
+    if (name.includes('goat')) return '🐐';
+    if (name.includes('ufc') || name.includes('fight')) return '🥊';
+    return '📺';
 }
 
 async function syncFromSource() {
@@ -617,96 +506,289 @@ async function syncFromSource() {
         return;
     }
 
+    const serverInput = document.getElementById('iptvServer');
+    const userInput = document.getElementById('iptvUser');
+    const passInput = document.getElementById('iptvPass');
+    if (serverInput && serverInput.value) iptvConfig.server = serverInput.value.replace(/\/$/, '');
+    if (userInput && userInput.value) iptvConfig.username = userInput.value;
+    if (passInput && passInput.value) iptvConfig.password = passInput.value;
+
     syncInProgress = true;
     const btn = document.getElementById('btnSync');
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = '⏳ Sincronizando...';
-    }
-    updateSyncUI('Buscando jogos...', '⏳');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Sincronizando...'; }
+    updateSyncUI('Conectando ao painel IPTV...', '⏳');
 
     try {
-        // 1. Fetch the source page
-        const html = await fetchWithProxy(SOURCE_URL);
-        updateSyncUI('Analisando pagina...', '🔍');
+        updateSyncUI('Buscando categorias...', '📡');
+        const categories = await fetchXtreamApi('get_live_categories');
+        const sportsCats = categories.filter(c => SPORTS_CATEGORY_IDS.includes(parseInt(c.category_id)));
 
-        // 2. Parse games
-        const games = parseGamesFromHtml(html);
-
-        if (games.length === 0) {
-            updateSyncUI('Nenhum jogo encontrado', '⚠️');
-            alert('Nenhum jogo foi encontrado no site fonte. O site pode ter mudado de estrutura.');
+        if (sportsCats.length === 0) {
+            updateSyncUI('Nenhuma categoria esportiva', '⚠️');
+            alert('Nenhuma categoria esportiva encontrada no painel.');
             return;
         }
 
-        updateSyncUI('Salvando ' + games.length + ' jogos...', '💾');
+        let allChannels = [];
+        for (let i = 0; i < sportsCats.length; i++) {
+            const cat = sportsCats[i];
+            const catLabel = getCategoryLabel(cat.category_name);
+            updateSyncUI(`Buscando: ${catLabel} (${i + 1}/${sportsCats.length})...`, '📺');
 
-        // 3. Clear old synced channels (only auto-synced ones, keep manual ones)
-        const existingChannels = await db.collection('channels').where('syncedAt', '!=', '').get();
-        const deletePromises = [];
-        existingChannels.forEach(doc => {
-            deletePromises.push(doc.ref.delete());
-        });
-        await Promise.all(deletePromises);
+            try {
+                const streams = await fetchXtreamApi(`get_live_streams&category_id=${cat.category_id}`);
+                const filtered = streams.filter(s => {
+                    const name = s.name.toUpperCase();
+                    if (name.includes('SD') && !name.includes('FHD')) return false;
+                    if (name.includes('[ALT]')) return false;
+                    return true;
+                });
 
-        // 4. Save new games
-        const savePromises = games.map(game => {
-            return db.collection('channels').add({
-                ...game,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                filtered.forEach(stream => {
+                    const channelName = cleanChannelName(stream.name);
+                    allChannels.push({
+                        home: channelName,
+                        away: 'Transmissão',
+                        league: catLabel,
+                        url: buildStreamUrl(stream.stream_id),
+                        streamPageUrl: '',
+                        scoreHome: 0, scoreAway: 0,
+                        matchDate: new Date().toISOString().split('T')[0],
+                        matchTime: '',
+                        time: 'Ao Vivo',
+                        status: 'live',
+                        thumb: stream.stream_icon || '',
+                        emojiHome: getTeamEmoji(channelName),
+                        emojiAway: '⚽',
+                        viewers: Math.floor(Math.random() * 20000) + 1000,
+                        syncedAt: new Date().toISOString(),
+                        streamId: stream.stream_id.toString(),
+                        categoryId: cat.category_id
+                    });
+                });
+            } catch (e) {
+                console.warn(`Erro categoria ${catLabel}:`, e.message);
+            }
+            if (i < sportsCats.length - 1) await new Promise(r => setTimeout(r, 300));
+        }
+
+        if (allChannels.length === 0) {
+            updateSyncUI('Nenhum canal encontrado', '⚠️');
+            return;
+        }
+
+        updateSyncUI(`Salvando ${allChannels.length} canais...`, '💾');
+
+        // Clear old synced
+        const existing = await db.collection('channels').where('syncedAt', '!=', '').get();
+        const delPromises = [];
+        existing.forEach(doc => delPromises.push(doc.ref.delete()));
+        await Promise.all(delPromises);
+
+        // Save in batches
+        let saved = 0;
+        for (let i = 0; i < allChannels.length; i += 500) {
+            const batch = db.batch();
+            allChannels.slice(i, i + 500).forEach(ch => {
+                batch.set(db.collection('channels').doc(), {
+                    ...ch,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
             });
-        });
-        await Promise.all(savePromises);
+            await batch.commit();
+            saved += Math.min(500, allChannels.length - i);
+            updateSyncUI(`Salvando... ${saved}/${allChannels.length}`, '💾');
+        }
 
-        updateSyncUI('✅ ' + games.length + ' jogos sincronizados!', '✅');
+        updateSyncUI(`✅ ${allChannels.length} canais sincronizados!`, '✅');
         updateLastSyncTime();
         loadChannels();
         loadStats();
-
-        console.log('Sync completa:', games.length, 'jogos');
-
     } catch (err) {
-        console.error('Erro na sincronizacao:', err);
+        console.error('Erro:', err);
         updateSyncUI('Erro: ' + err.message, '❌');
-        alert('Erro na sincronizacao: ' + err.message + '\n\nTente novamente em alguns instantes.');
+        alert('Erro: ' + err.message + '\n\nVerifique as credenciais IPTV.');
     } finally {
         syncInProgress = false;
-        if (btn) {
-            btn.disabled = false;
-            btn.textContent = '🔄 Sincronizar Jogos';
-        }
+        if (btn) { btn.disabled = false; btn.textContent = '🔄 Sincronizar IPTV'; }
     }
 }
 
 function toggleAutoSync() {
     const toggle = document.getElementById('autoSyncToggle');
-
     if (toggle && toggle.checked) {
-        // Start auto-sync every 30 minutes
         updateSyncUI('Ativa — proxima sync em 30 min', '🟢');
-
-        // Do first sync immediately
         syncFromSource();
-
-        // Set interval for every 30 minutes (1800000 ms)
-        autoSyncInterval = setInterval(() => {
-            console.log('Auto-sync disparada:', new Date().toLocaleTimeString());
-            syncFromSource();
-        }, 30 * 60 * 1000); // 30 minutes
-
+        autoSyncInterval = setInterval(() => syncFromSource(), 30 * 60 * 1000);
     } else {
-        // Stop auto-sync
-        if (autoSyncInterval) {
-            clearInterval(autoSyncInterval);
-            autoSyncInterval = null;
-        }
+        if (autoSyncInterval) { clearInterval(autoSyncInterval); autoSyncInterval = null; }
         updateSyncUI('Desativada', '📡');
     }
 }
 
-// Restore auto-sync state if page was left open
-window.addEventListener('beforeunload', () => {
-    if (autoSyncInterval) {
-        clearInterval(autoSyncInterval);
+function saveIptvConfig() {
+    const s = document.getElementById('iptvServer');
+    const u = document.getElementById('iptvUser');
+    const p = document.getElementById('iptvPass');
+    if (s) iptvConfig.server = s.value.replace(/\/$/, '');
+    if (u) iptvConfig.username = u.value;
+    if (p) iptvConfig.password = p.value;
+    localStorage.setItem('iptvConfig', JSON.stringify(iptvConfig));
+    alert('✅ Configuracoes IPTV salvas!');
+}
+
+function loadIptvConfig() {
+    const saved = localStorage.getItem('iptvConfig');
+    if (saved) {
+        try { iptvConfig = { ...iptvConfig, ...JSON.parse(saved) }; } catch (e) { }
     }
+    const s = document.getElementById('iptvServer');
+    const u = document.getElementById('iptvUser');
+    const p = document.getElementById('iptvPass');
+    if (s) s.value = iptvConfig.server;
+    if (u) u.value = iptvConfig.username;
+    if (p) p.value = iptvConfig.password;
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+    loadIptvConfig();
+    loadIptvChannelsDropdown();
 });
+window.addEventListener('beforeunload', () => { if (autoSyncInterval) clearInterval(autoSyncInterval); });
+
+// ===== IPTV CHANNEL SELECTOR FOR FORM =====
+let iptvChannelsList = [];
+
+async function loadIptvChannelsDropdown() {
+    const select = document.getElementById('chIptvSelect');
+    if (!select) return;
+
+    select.innerHTML = '<option value="">-- Carregando canais IPTV... --</option>';
+
+    try {
+        // Use config from iptv-config.js if available, otherwise use local iptvConfig
+        const cfg = (typeof IPTV_CONFIG !== 'undefined') ? IPTV_CONFIG : iptvConfig;
+        const categories = cfg.sportCategories || SPORTS_CATEGORY_IDS.map(id => ({ id: String(id), name: 'Cat ' + id }));
+
+        const allStreams = [];
+
+        for (const cat of categories) {
+            const catId = cat.id || cat;
+            const catName = cat.name || 'Categoria ' + catId;
+            try {
+                let apiUrl;
+                if (typeof IPTV_CONFIG !== 'undefined') {
+                    apiUrl = IPTV_CONFIG.getApiUrl('get_live_streams', `&category_id=${catId}`);
+                } else {
+                    apiUrl = xtreamUrl(`get_live_streams&category_id=${catId}`);
+                }
+
+                const res = await fetch(apiUrl, { signal: AbortSignal.timeout(10000) });
+                if (!res.ok) continue;
+                const streams = await res.json();
+                if (!Array.isArray(streams)) continue;
+
+                streams.forEach(s => {
+                    s._categoryName = catName;
+                });
+                allStreams.push(...streams);
+            } catch (e) {
+                console.warn(`IPTV dropdown: failed to load ${catName}`);
+            }
+        }
+
+        iptvChannelsList = allStreams;
+
+        // Build dropdown grouped by category
+        let html = '<option value="">-- Selecione um canal IPTV (' + allStreams.length + ' canais) --</option>';
+        html += '<option value="_manual">✏️ Inserir URL manualmente</option>';
+
+        // Group by category
+        const grouped = {};
+        allStreams.forEach(s => {
+            const cat = s._categoryName || 'Outros';
+            if (!grouped[cat]) grouped[cat] = [];
+            grouped[cat].push(s);
+        });
+
+        for (const [catName, streams] of Object.entries(grouped)) {
+            html += `<optgroup label="${catName} (${streams.length})">`;
+            streams.forEach(s => {
+                let streamUrl;
+                if (typeof IPTV_CONFIG !== 'undefined') {
+                    streamUrl = IPTV_CONFIG.getM3U8Url(s.stream_id);
+                } else {
+                    streamUrl = buildStreamUrl(s.stream_id);
+                }
+                html += `<option value="${streamUrl}" data-name="${s.name}" data-stream-id="${s.stream_id}">${s.name}</option>`;
+            });
+            html += '</optgroup>';
+        }
+
+        select.innerHTML = html;
+        console.log(`✅ IPTV dropdown: ${allStreams.length} canais carregados`);
+
+    } catch (e) {
+        console.error('Erro ao carregar canais IPTV:', e);
+        select.innerHTML = '<option value="">-- Erro ao carregar canais --</option><option value="_manual">✏️ Inserir URL manualmente</option>';
+    }
+}
+
+function onIptvChannelSelect(value) {
+    if (value === '_manual' || !value) {
+        document.getElementById('chUrl').value = '';
+        document.getElementById('chUrl').focus();
+        document.getElementById('chIptvUrl').value = '';
+        document.getElementById('chIptvChannelField').value = '';
+        const label = document.getElementById('chIptvChannelName');
+        if (label) { label.style.display = 'none'; label.textContent = ''; }
+        return;
+    }
+
+    const select = document.getElementById('chIptvSelect');
+    const selected = select.options[select.selectedIndex];
+    const channelName = selected ? selected.getAttribute('data-name') || selected.textContent : '';
+    const streamId = selected ? selected.getAttribute('data-stream-id') : '';
+
+    // Also build the TS URL as fallback
+    let tsUrl = '';
+    if (typeof IPTV_CONFIG !== 'undefined' && streamId) {
+        tsUrl = IPTV_CONFIG.getStreamUrl(streamId, 'ts');
+    }
+
+    // Set the URL field
+    document.getElementById('chUrl').value = value;
+    document.getElementById('chIptvUrl').value = value;
+    document.getElementById('chIptvChannelField').value = channelName;
+
+    // Show channel name label
+    const label = document.getElementById('chIptvChannelName');
+    if (label) {
+        label.textContent = '📡 ' + channelName + (tsUrl ? ' | TS: ' + tsUrl : '');
+        label.style.display = 'block';
+    }
+}
+
+function filterIptvOptions(query) {
+    const select = document.getElementById('chIptvSelect');
+    if (!select) return;
+    const q = query.toLowerCase().trim();
+
+    // If query is empty, show all
+    if (!q) {
+        Array.from(select.options).forEach(opt => opt.style.display = '');
+        Array.from(select.querySelectorAll('optgroup')).forEach(g => g.style.display = '');
+        return;
+    }
+
+    // Filter options
+    Array.from(select.querySelectorAll('optgroup')).forEach(group => {
+        let hasVisible = false;
+        Array.from(group.querySelectorAll('option')).forEach(opt => {
+            const matches = opt.textContent.toLowerCase().includes(q);
+            opt.style.display = matches ? '' : 'none';
+            if (matches) hasVisible = true;
+        });
+        group.style.display = hasVisible ? '' : 'none';
+    });
+}

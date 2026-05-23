@@ -36,7 +36,7 @@
                     <button class="btn btn-gold" onclick="toggleM3uImport()">&#128229; Importar Lista M3U</button>
                     <button class="btn btn-secondary" onclick="syncFromSource()" id="btnSync"
                         style="background:linear-gradient(135deg,rgba(68,138,255,.15),rgba(0,230,118,.15));border-color:rgba(68,138,255,.3);color:#448aff">&#128260;
-                        Sincronizar Jogos</button>
+                        Sincronizar IPTV</button>
                     <button class="btn btn-danger" onclick="deleteAllChannels()">&#128465;&#65039; Limpar Tudo</button>
                 </div>
             </div>
@@ -58,6 +58,33 @@
                             style="width:18px;height:18px;accent-color:var(--accent-green)">
                         <span style="font-size:.85rem;font-weight:600">Auto (30 min)</span>
                     </label>
+                </div>
+            </div>
+
+            <!-- IPTV CONFIG -->
+            <div id="iptvConfigPanel"
+                style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:24px">
+                <h3 style="font-size:1rem;font-weight:700;margin-bottom:16px">📡 Configuração IPTV (Xtream Codes)</h3>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px">
+                    <div class="form-group" style="margin-bottom:0">
+                        <label style="font-size:.78rem;color:var(--text-muted)">Servidor</label>
+                        <input type="text" id="iptvServer" value="http://horizonmult.fun" placeholder="http://servidor.com"
+                            style="font-size:.85rem;padding:8px 12px">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0">
+                        <label style="font-size:.78rem;color:var(--text-muted)">Usuário</label>
+                        <input type="text" id="iptvUser" value="thpalmeira" placeholder="username"
+                            style="font-size:.85rem;padding:8px 12px">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0">
+                        <label style="font-size:.78rem;color:var(--text-muted)">Senha</label>
+                        <input type="password" id="iptvPass" value="1643363hdgsje" placeholder="password"
+                            style="font-size:.85rem;padding:8px 12px">
+                    </div>
+                </div>
+                <div style="display:flex;gap:12px;align-items:center">
+                    <button class="btn btn-secondary" onclick="saveIptvConfig()" style="font-size:.85rem;padding:8px 16px">💾 Salvar Config</button>
+                    <span style="font-size:.75rem;color:var(--text-muted)">As credenciais são salvas localmente no navegador</span>
                 </div>
             </div>
 
@@ -98,9 +125,20 @@
                             <label>Campeonato</label>
                             <input type="text" id="chLeague" placeholder="Ex: Brasileirão Série A">
                         </div>
-                        <div class="form-group">
-                            <label>URL do Stream (M3U/M3U8)</label>
-                            <input type="url" id="chUrl" placeholder="https://... .m3u8" required>
+                        <div class="form-group" style="grid-column:1/-1">
+                            <label>📡 Canal IPTV (selecione da sua lista)</label>
+                            <select id="chIptvSelect" onchange="onIptvChannelSelect(this.value)" style="margin-bottom:8px">
+                                <option value="">-- Selecione um canal IPTV --</option>
+                                <option value="_loading" disabled>Carregando canais...</option>
+                            </select>
+                            <div id="iptvSearchBox" style="position:relative;margin-bottom:8px">
+                                <input type="text" id="iptvSearch" placeholder="🔍 Buscar canal IPTV..." oninput="filterIptvOptions(this.value)" style="font-size:.85rem;padding:8px 12px">
+                            </div>
+                        </div>
+                        <div class="form-group" style="grid-column:1/-1">
+                            <label>URL do Stream (preenchido automaticamente ou manual)</label>
+                            <input type="url" id="chUrl" placeholder="https://... .m3u8 ou .ts">
+                            <span id="chIptvChannelName" style="font-size:.75rem;color:var(--accent-green);margin-top:4px;display:none"></span>
                         </div>
                         <div class="form-group">
                             <label>Placar Casa</label>
@@ -144,6 +182,8 @@
                         </div>
                     </div>
                     <input type="hidden" id="chEditId" value="">
+                    <input type="hidden" id="chIptvUrl" value="">
+                    <input type="hidden" id="chIptvChannelField" value="">
                     <div style="display:flex;gap:12px;margin-top:20px">
                         <button type="submit" class="btn btn-primary">💾 Salvar Canal</button>
                         <button type="button" class="btn btn-secondary" onclick="toggleForm()">Cancelar</button>
@@ -245,6 +285,7 @@ https://stream.example.com/canal2.m3u8" style="resize:vertical;min-height:200px"
 
     <script src="firebase-config.js"></script>
     <script src="auth.js"></script>
+    <script src="iptv-config.js"></script>
     <script src="admin.js"></script>
     <script>
         // Show login if not authenticated

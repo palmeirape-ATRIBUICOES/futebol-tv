@@ -1,12 +1,16 @@
 {
-    "name": "futebol-tv-sync",
+    "name": "futebol-tv-master",
     "version": "1.0.0",
-    "description": "Auto-sync script for Futebol TV — runs every 30 min via GitHub Actions",
+    "description": "Futebol TV app with integrated server proxy and auto-sync script",
     "private": true,
     "scripts": {
+        "start": "node server/server.js",
+        "dev": "node server/server.js",
         "sync": "node scripts/sync-games.js"
     },
     "dependencies": {
+        "cors": "^2.8.5",
+        "express": "^4.18.2",
         "node-fetch": "^2.7.0",
         "node-html-parser": "^6.1.0"
     }

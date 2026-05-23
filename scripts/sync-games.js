@@ -14,6 +14,85 @@ const FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID
 const INDEX_URL = 'https://apk.futemais.eu/app2/';
 const PLAYER_BASE = 'https://links3.futemais.eu/canalapps.php';
 
+// Authentication State for Firestore REST API
+let authToken = '';
+
+async function authenticate() {
+    const email = process.env.FIREBASE_ADMIN_EMAIL;
+    const password = process.env.FIREBASE_ADMIN_PASSWORD;
+    if (!email || !password) {
+        console.log('ℹ️  No credentials found in environment (FIREBASE_ADMIN_EMAIL / FIREBASE_ADMIN_PASSWORD). Running Firestore API requests anonymously.');
+        return;
+    }
+    try {
+        console.log(`🔐 Authenticating as ${email}...`);
+        const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FIREBASE_API_KEY}`;
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, returnSecureToken: true })
+        });
+        if (!res.ok) {
+            const err = await res.text();
+            throw new Error(`Auth failed: ${res.status} - ${err}`);
+        }
+        const data = await res.json();
+        authToken = data.idToken;
+        console.log('✅ Authenticated successfully!');
+    } catch (e) {
+        console.error('⚠️  Authentication failed:', e.message);
+    }
+}
+
+function getFirestoreHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+    }
+    return headers;
+}
+
+// ===== REAL-TIME MONITORING NOTIFICATIONS =====
+async function sendNotification(message) {
+    const discordUrl = process.env.DISCORD_WEBHOOK_URL;
+    const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+    const telegramChatId = process.env.TELEGRAM_CHAT_ID;
+
+    if (discordUrl) {
+        try {
+            await fetch(discordUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    content: message,
+                    username: '⚽ Futebol TV Monitor'
+                })
+            });
+            console.log('🔔 Discord notification sent.');
+        } catch (e) {
+            console.error('⚠️ Failed to send Discord notification:', e.message);
+        }
+    }
+
+    if (telegramToken && telegramChatId) {
+        try {
+            const url = `https://api.telegram.org/bot${telegramToken}/sendMessage`;
+            await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: telegramChatId,
+                    text: message,
+                    parse_mode: 'Markdown'
+                })
+            });
+            console.log('🔔 Telegram notification sent.');
+        } catch (e) {
+            console.error('⚠️ Failed to send Telegram notification:', e.message);
+        }
+    }
+}
+
 // ===== JUNK FILTER =====
 const JUNK_KEYWORDS = [
     'function', 'var ', 'const ', 'let ', 'push(', 'getElementById',
@@ -62,13 +141,13 @@ function getTeamEmoji(team) {
 }
 
 // ===== HTTP FETCHER =====
-async function fetchPage(url) {
+async function fetchPage(url, referer) {
     const res = await fetch(url, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.7',
-            'Referer': 'https://apk.futemais.eu/'
+            'Referer': referer || 'https://apk.futemais.eu/'
         },
         redirect: 'follow'
     });
@@ -77,12 +156,11 @@ async function fetchPage(url) {
 }
 
 // ===== EXTRACT M3U8 FROM PLAYER PAGE =====
-async function extractStreamUrl(gameId) {
+async function extractStreamUrl(playerUrl) {
     try {
         // STEP 1: Fetch the game player page (canalapps.php)
-        const playerUrl = `${PLAYER_BASE}?id=${gameId}`;
         console.log(`   🔍 Step A: Fetching player page...`);
-        const html = await fetchPage(playerUrl);
+        const html = await fetchPage(playerUrl, 'https://apk.futemais.eu/');
 
         // STEP 2: Look for direct M3U8 first
         const m3u8Direct = html.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
@@ -116,6 +194,25 @@ async function extractStreamUrl(gameId) {
             }
         }
 
+        // Also search in onclick changeChannel handlers
+        if (!opcaoUrl) {
+            const changeChannelMatches = html.match(/changeChannel\(['"]([^'"]+)['"]\)/gi) || [];
+            for (const match of changeChannelMatches) {
+                const m = match.match(/changeChannel\(['"]([^'"]+)['"]\)/i);
+                if (m) {
+                    const clean = m[1];
+                    if (clean.includes('ads') || clean.includes('google')) continue;
+                    if (clean.includes('opcao') || clean.includes('canais') || clean.includes('futemais')) {
+                        console.log(`   📺 Found changeChannel URL: ${clean.substring(0, 100)}...`);
+                        opcaoUrl = clean;
+                        const canalMatch = clean.match(/id=(canal\d+)/i);
+                        if (canalMatch) canalId = canalMatch[1];
+                        break;
+                    }
+                }
+            }
+        }
+
         // Also search in onclick handlers and JS
         if (!opcaoUrl) {
             const jsUrls = html.match(/["'](https?:\/\/[^"']*(?:opcao|canais)[^"']*)/gi) || [];
@@ -134,7 +231,7 @@ async function extractStreamUrl(gameId) {
         if (opcaoUrl) {
             try {
                 console.log(`   🔍 Step B: Following iframe...`);
-                const opcaoHtml = await fetchPage(opcaoUrl);
+                const opcaoHtml = await fetchPage(opcaoUrl, playerUrl);
 
                 // Look for M3U8 in the opcao page
                 const m3u8Opcao = opcaoHtml.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
@@ -171,7 +268,7 @@ async function extractStreamUrl(gameId) {
 
                     console.log(`   📺 Nested: ${fullNSrc.substring(0, 80)}...`);
                     try {
-                        const nestedHtml = await fetchPage(fullNSrc);
+                        const nestedHtml = await fetchPage(fullNSrc, opcaoUrl);
                         const nM3u8 = nestedHtml.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
                         if (nM3u8.length > 0) {
                             const url = nM3u8[0].replace(/\\+/g, '');
@@ -289,13 +386,22 @@ function parseGamesFromIndex(html) {
 
         console.log(`   ✅ Game: ${home} x ${away} (${league || '?'}) ${matchTime || ''} [id=${gameId}]`);
 
+        let streamPageUrl = href;
+        if (!href.startsWith('http')) {
+            try {
+                streamPageUrl = new URL(href, INDEX_URL).toString();
+            } catch (e) {
+                streamPageUrl = href;
+            }
+        }
+
         games.push({
             home, away, gameId,
             league: league || 'Campeonato',
             matchTime: matchTime || '',
             matchDate: new Date().toISOString().split('T')[0],
             status: 'live',
-            streamPageUrl: `${PLAYER_BASE}?id=${gameId}`,
+            streamPageUrl,
             url: '', // Will be filled with M3U8
             scoreHome: 0, scoreAway: 0,
             time: matchTime || 'Ao Vivo',
@@ -324,8 +430,9 @@ function gameToFirestoreDoc(game) {
 
 async function deleteOldSyncedDocs() {
     console.log('🗑️  Deleting old synced docs...');
+    const headers = getFirestoreHeaders();
     const queryUrl = `${FIRESTORE_URL}/channels?key=${FIREBASE_API_KEY}&pageSize=200`;
-    const res = await fetch(queryUrl);
+    const res = await fetch(queryUrl, { headers });
     if (!res.ok) { console.warn('   Could not list docs:', res.status); return 0; }
 
     const data = await res.json();
@@ -335,7 +442,7 @@ async function deleteOldSyncedDocs() {
     for (const doc of docs) {
         if (doc.fields && doc.fields.syncedAt && doc.fields.syncedAt.stringValue) {
             const delUrl = `https://firestore.googleapis.com/v1/${doc.name}?key=${FIREBASE_API_KEY}`;
-            const delRes = await fetch(delUrl, { method: 'DELETE' });
+            const delRes = await fetch(delUrl, { method: 'DELETE', headers });
             if (delRes.ok) deleted++;
         }
     }
@@ -349,7 +456,7 @@ async function addGameDoc(game) {
     const body = gameToFirestoreDoc(game);
     const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getFirestoreHeaders(),
         body: JSON.stringify(body)
     });
     if (!res.ok) {
@@ -367,6 +474,9 @@ async function main() {
     console.log('⚽ FUTEBOL TV — SYNC + STREAM EXTRACT v3');
     console.log(`📅 ${brTime}`);
     console.log('==========================================');
+
+    // Authenticate first if credentials are provided in the environment
+    await authenticate();
 
     try {
         // === Step 1: Get game list ===
@@ -393,7 +503,10 @@ async function main() {
             // Show first link with id= for debugging
             const firstIdLink = html.match(/<a[^>]*id=\d+[^>]*>[^<]*/i);
             if (firstIdLink) console.log(`   First id link: ${firstIdLink[0].substring(0, 150)}`);
-            process.exit(0);
+            
+            const errMsg = '⚠️ *Futebol TV Scraper Alert*: Nenhum jogo foi encontrado no site fonte! A estrutura do portal pode ter mudado.';
+            await sendNotification(errMsg);
+            process.exit(1);
         }
 
         // === Step 3: Extract streams ===
@@ -404,7 +517,7 @@ async function main() {
             const game = games[i];
             console.log(`\n   [${i + 1}/${games.length}] ${game.home} x ${game.away}`);
 
-            const streamUrl = await extractStreamUrl(game.gameId);
+            const streamUrl = await extractStreamUrl(game.streamPageUrl);
             if (streamUrl) {
                 if (streamUrl.includes('.m3u8')) {
                     game.url = streamUrl;
@@ -421,6 +534,13 @@ async function main() {
         }
 
         console.log(`\n   📊 Streams: ${streamsFound}/${games.length}`);
+
+        if (games.length > 0 && streamsFound === 0) {
+            const errMsg = `⚠️ *Futebol TV Scraper Alert*: Encontrou *${games.length} jogos*, mas *nenhum* link de transmissão (.m3u8) pôde ser extraído! É muito provável que o formato do player do site tenha mudado.`;
+            console.error('\n' + errMsg);
+            await sendNotification(errMsg);
+            process.exit(1);
+        }
 
         // === Step 4: Clean old data ===
         console.log('\n🗑️  Step 4: Cleaning old data...');
@@ -450,6 +570,7 @@ async function main() {
 
     } catch (err) {
         console.error('❌ Sync error:', err.message);
+        await sendNotification(`❌ *Futebol TV Sync Error*:\n\`\`\`\n${err.message}\n\`\`\``);
         process.exit(1);
     }
 }
