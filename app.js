@@ -62,6 +62,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (proxyUrlInput) proxyUrlInput.value = proxyUrl;
 
+    // Alerta se rodando em GitHub Pages (ou outro host estático) sem proxy configurado
+    if ((window.location.hostname.includes('github.io') || window.location.hostname.includes('web.app')) && proxyUrl === origin) {
+        console.warn('[Futebol TV] Atenção: Rodando em servidor estático sem um proxy backend configurado.');
+        setTimeout(() => {
+            showToast('⚠️ Proxy não configurado! Acesse via URL do Render/Railway ou insira a URL do proxy no Painel Admin.', 'error');
+        }, 3500);
+    }
+
     // Aguarda autenticação anônima antes de carregar canais
     // Isso garante que as Firestore Security Rules sejam satisfeitas
     let channelsLoaded = false;
