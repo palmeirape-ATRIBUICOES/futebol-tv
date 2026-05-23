@@ -114,111 +114,152 @@ app.get('/proxy', async (req, res) => {
 });
 
 // ===== STREAM PROXY INTELIGENTE =====
-// Uso: /stream-proxy?pageUrl=https://links2.futemais.eu/canalapps.php?id=13801
-// Extrai token fresco em tempo real — resolve o erro 403 do token expirado
+// Extrai token fresco em tempo real para evitar erro 403 de token expirado.
+// Cadeia correta de Referers: ligapk.com → links2.futemais.eu → links.futemais.eu
 app.get('/stream-proxy', async (req, res) => {
     let pageUrl = req.query.pageUrl;
     if (!pageUrl) return res.status(400).json({ error: 'Missing pageUrl parameter' });
 
     try { pageUrl = decodeURIComponent(pageUrl); } catch(e) {}
-    console.log(`🎯 Stream-Proxy: buscando token para ${pageUrl.substring(0, 80)}`);
+    console.log(`🎯 Stream-Proxy: ${pageUrl.substring(0, 80)}`);
 
-    try {
-        // PASSO 1: Buscar a página do player
-        const playerRes = await fetch(pageUrl, {
+    // Helper: buscar HTML com headers corretos
+    async function fetchHtml(url, referer, origin) {
+        const r = await fetch(url, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
-                'Referer': 'https://apk.futemais.eu/',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'pt-BR,pt;q=0.9'
-            }
+                'Accept-Language': 'pt-BR,pt;q=0.9',
+                ...(referer ? { 'Referer': referer } : {}),
+                ...(origin  ? { 'Origin':  origin  } : {}),
+            },
+            redirect: 'follow'
         });
+        if (!r.ok) throw new Error(`HTTP ${r.status} para ${url}`);
+        return r.text();
+    }
 
-        if (!playerRes.ok) {
-            return res.status(502).json({ error: `Player page returned ${playerRes.status}` });
+    // Helper: extrair M3U8 do HTML
+    function extractM3u8(html) {
+        const matches = html.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
+        if (matches.length > 0) return matches[0].replace(/\\+/g, '');
+        const src = html.match(/source\s*[:=]\s*['"]([^'"]+\.m3u8[^'"]*)/i);
+        if (src) return src[1];
+        return null;
+    }
+
+    try {
+        // ── PASSO 1: Buscar a página do player (ex: links2.futemais.eu/canalapps.php?id=13802)
+        // Referer: ligapk.com (pois o usuário veio de lá)
+        const playerHtml = await fetchHtml(pageUrl, 'https://ligapk.com/', 'https://ligapk.com');
+        console.log(`   Player page: ${playerHtml.length} bytes`);
+
+        // ── PASSO 2: M3U8 direto na página do player?
+        const directM3u8 = extractM3u8(playerHtml);
+        if (directM3u8) {
+            console.log(`✅ M3U8 direto: ${directM3u8.substring(0, 80)}`);
+            return res.redirect(`/proxy?url=${encodeURIComponent(directM3u8)}`);
         }
 
-        const playerHtml = await playerRes.text();
-
-        // PASSO 2: Tentar M3U8 direto na página do player
-        const directM3u8 = playerHtml.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
-        if (directM3u8.length > 0) {
-            const freshUrl = directM3u8[0].replace(/\\+/g, '');
-            console.log(`✅ M3U8 direto: ${freshUrl.substring(0, 80)}`);
-            return res.redirect(`/proxy?url=${encodeURIComponent(freshUrl)}`);
-        }
-
-        // PASSO 3: Procurar changeChannel com URL de opcao
+        // ── PASSO 3: Extrair URLs das opções (changeChannel)
+        // Prioridade 1: links.futemais.eu/canais3/opcao (mais confiável)
+        // Prioridade 2: superdinamico.com/prime.php (fallback)
+        const changeChannels = [...playerHtml.matchAll(/changeChannel\(['"]([^'"]+)['"]\)/gi)];
         let opcaoUrl = '';
-        const changeChannels = playerHtml.match(/changeChannel\(['"]([^'"]+)['"]\)/gi) || [];
+        let superdinamicoUrl = '';
+
         for (const match of changeChannels) {
-            const m = match.match(/changeChannel\(['"]([^'"]+)['"]\)/i);
-            if (m && (m[1].includes('opcao') || m[1].includes('canais') || m[1].includes('futemais'))) {
-                opcaoUrl = m[1];
-                break;
+            const url = match[1];
+            if ((url.includes('opcao') || url.includes('canais')) && url.includes('futemais') && !opcaoUrl) {
+                opcaoUrl = url;
+            }
+            if (url.includes('superdinamico') && !superdinamicoUrl) {
+                superdinamicoUrl = url;
             }
         }
 
-        // Fallback: src de iframe
-        if (!opcaoUrl) {
-            const iframeSrcs = playerHtml.match(/src=['"]([^'"]*(?:opcao|canais)[^'"]*)['"]/gi) || [];
+        // Fallback: procurar em src de iframe
+        if (!opcaoUrl && !superdinamicoUrl) {
+            const iframeSrcs = [...playerHtml.matchAll(/src=['"]([^'"]+(?:opcao|canais|superdinamico)[^'"]*)['"]/gi)];
             for (const s of iframeSrcs) {
-                const srcM = s.match(/src=['"]([^'"]+)['"]/i);
-                if (srcM && !srcM[1].includes('google') && !srcM[1].includes('ads')) {
-                    opcaoUrl = srcM[1].startsWith('//') ? 'https:' + srcM[1] : srcM[1];
-                    break;
+                const u = s[1].startsWith('//') ? 'https:' + s[1] : s[1];
+                if (u.includes('futemais')) { opcaoUrl = u; break; }
+                if (u.includes('superdinamico')) { superdinamicoUrl = u; break; }
+            }
+        }
+
+        // ── PASSO 4A: Tentar opcao do futemais
+        // Referer correto: a página do player (links2.futemais.eu)
+        if (opcaoUrl) {
+            console.log(`📺 Opcao futemais: ${opcaoUrl.substring(0, 80)}`);
+            try {
+                const opcaoHtml = await fetchHtml(opcaoUrl, pageUrl, new URL(pageUrl).origin);
+                const m3u8 = extractM3u8(opcaoHtml);
+                if (m3u8) {
+                    console.log(`✅ M3U8 futemais: ${m3u8.substring(0, 80)}`);
+                    return res.redirect(`/proxy?url=${encodeURIComponent(m3u8)}`);
                 }
+            } catch(e) {
+                console.warn(`   Opcao futemais falhou: ${e.message}`);
             }
         }
 
-        if (!opcaoUrl) {
-            return res.status(502).json({ error: 'No stream option found in player page' });
-        }
+        // ── PASSO 4B: Tentar superdinamico.com
+        // Usa um endpoint REFRESH para obter a URL do stream
+        if (superdinamicoUrl) {
+            console.log(`📺 Superdinamico: ${superdinamicoUrl.substring(0, 80)}`);
+            try {
+                const sdHtml = await fetchHtml(superdinamicoUrl, pageUrl, new URL(pageUrl).origin);
+                
+                // Extrair PAGE_TOKEN e REFRESH_ENDPOINT do JS embutido
+                const tokenMatch = sdHtml.match(/PAGE_TOKEN\s*=\s*['"]([^'"]+)['"]/);
+                const endpointMatch = sdHtml.match(/REFRESH_ENDPOINT\s*=\s*['"]([^'"]+)['"]/);
+                
+                if (tokenMatch && endpointMatch) {
+                    const token = tokenMatch[1];
+                    const endpoint = endpointMatch[1];
+                    const baseUrl = new URL(superdinamicoUrl);
+                    const refreshUrl = `${baseUrl.origin}/${endpoint}`;
+                    
+                    console.log(`   🔑 Buscando URL via refresh endpoint: ${refreshUrl}`);
+                    const refreshRes = await fetch(refreshUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Referer': superdinamicoUrl,
+                            'Origin': baseUrl.origin,
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        },
+                        body: `token=${encodeURIComponent(token)}`
+                    });
+                    
+                    if (refreshRes.ok) {
+                        const data = await refreshRes.json().catch(() => null);
+                        const streamUrl = data?.url || data?.stream || data?.src;
+                        if (streamUrl && streamUrl.includes('.m3u8')) {
+                            console.log(`✅ M3U8 superdinamico: ${streamUrl.substring(0, 80)}`);
+                            return res.redirect(`/proxy?url=${encodeURIComponent(streamUrl)}`);
+                        }
+                    }
+                }
 
-        console.log(`📺 Seguindo opcao: ${opcaoUrl.substring(0, 80)}`);
-
-        // PASSO 4: Buscar a página da opção com Referer correto
-        const opcaoOrigin = (() => { try { return new URL(pageUrl).origin; } catch(e) { return 'https://links2.futemais.eu'; } })();
-        const opcaoRes = await fetch(opcaoUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': pageUrl,
-                'Origin': opcaoOrigin,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                // Fallback: procurar M3U8 direto no HTML do superdinamico
+                const sdM3u8 = extractM3u8(sdHtml);
+                if (sdM3u8) {
+                    console.log(`✅ M3U8 superdinamico direto: ${sdM3u8.substring(0, 80)}`);
+                    return res.redirect(`/proxy?url=${encodeURIComponent(sdM3u8)}`);
+                }
+            } catch(e) {
+                console.warn(`   Superdinamico falhou: ${e.message}`);
             }
-        });
-
-        if (!opcaoRes.ok) {
-            return res.status(502).json({ error: `Opcao page returned ${opcaoRes.status}` });
         }
 
-        const opcaoHtml = await opcaoRes.text();
-
-        // PASSO 5: Extrair M3U8 com token fresco
-        const m3u8s = opcaoHtml.match(/https?:\/\/[^\s"'<>\\]*\.m3u8[^\s"'<>\\]*/gi) || [];
-        if (m3u8s.length > 0) {
-            const freshUrl = m3u8s[0].replace(/\\+/g, '');
-            console.log(`✅ M3U8 fresco: ${freshUrl.substring(0, 80)}`);
-            return res.redirect(`/proxy?url=${encodeURIComponent(freshUrl)}`);
-        }
-
-        // Procurar via source: config do Clappr/HLS
-        const sourceConfigs = opcaoHtml.match(/source\s*[:=]\s*['"]([^'"]+\.m3u8[^'"]*)/gi) || [];
-        if (sourceConfigs.length > 0) {
-            const srcMatch = sourceConfigs[0].match(/(https?:\/\/[^'"]+)/);
-            if (srcMatch) {
-                const freshUrl = srcMatch[1];
-                console.log(`✅ Clappr source fresco: ${freshUrl.substring(0, 80)}`);
-                return res.redirect(`/proxy?url=${encodeURIComponent(freshUrl)}`);
-            }
-        }
-
-        console.error('❌ Nenhum M3U8 encontrado na página da opção');
-        res.status(502).json({ error: 'No M3U8 stream found in option page' });
+        console.error('❌ Nenhum M3U8 encontrado');
+        res.status(502).json({ error: 'No M3U8 stream found', pageUrl, opcaoUrl, superdinamicoUrl });
 
     } catch (err) {
         console.error(`❌ Stream-Proxy error:`, err.message);
-        res.status(502).json({ error: 'Stream proxy error: ' + err.message });
+        res.status(502).json({ error: err.message, pageUrl });
     }
 });
 
