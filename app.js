@@ -9,6 +9,7 @@ let hls = null;
 let currentChannel = null;
 let isAdmin = false;
 let proxyUrl = '';
+let globalChannels = [];
 
 // === DOM REFS ===
 const $ = (id) => document.getElementById(id);
@@ -25,6 +26,10 @@ const liveBadge = $('live-badge');
 const channelsGrid = $('channels-grid');
 const channelCount = $('channel-count');
 const noChannels = $('no-channels');
+
+// Player Options
+const playerOptionsContainer = $('player-options-container');
+const optionsButtons = $('options-buttons');
 
 // Admin
 const adminModal = $('admin-modal');
@@ -47,16 +52,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 1800);
 
     // Load proxy from localStorage, default to current origin
-    proxyUrl = localStorage.getItem('proxyUrl') || window.location.origin;
+    let origin = window.location.origin;
+    if (!origin || origin.startsWith('file')) {
+        origin = 'http://localhost:3000';
+    }
+    proxyUrl = localStorage.getItem('proxyUrl') || origin;
+    if (!proxyUrl || !proxyUrl.startsWith('http')) {
+        proxyUrl = origin;
+    }
     if (proxyUrlInput) proxyUrlInput.value = proxyUrl;
 
     // Aguarda autenticação anônima antes de carregar canais
     // Isso garante que as Firestore Security Rules sejam satisfeitas
+    let channelsLoaded = false;
     auth.onAuthStateChanged((user) => {
-        if (user) {
+        if (user && !channelsLoaded) {
+            channelsLoaded = true;
             loadChannels();
         }
     });
+
+    // Fallback: se em 2.5 segundos não logar via firebase, tenta carregar direto
+    setTimeout(() => {
+        if (!channelsLoaded) {
+            console.warn('[Firebase] Auth timeout ou falha: Carregando canais em modo de segurança.');
+            channelsLoaded = true;
+            loadChannels();
+        }
+    }, 2500);
 
     // Setup event listeners
     setupEvents();
@@ -64,6 +87,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ===== FIREBASE: Load Channels (realtime) =====
 function loadChannels() {
+    if (!db) {
+        loadLocalFallbackChannels();
+        return;
+    }
     db.collection(CHANNELS_COLLECTION)
         .orderBy('createdAt', 'desc')
         .onSnapshot((snapshot) => {
@@ -71,12 +98,40 @@ function loadChannels() {
             snapshot.forEach((doc) => {
                 channels.push({ id: doc.id, ...doc.data() });
             });
-            renderChannels(channels);
-            if (isAdmin) renderAdminChannels(channels);
+            if (channels.length > 0) {
+                globalChannels = channels;
+                renderChannels(channels);
+                if (isAdmin) renderAdminChannels(channels);
+            } else {
+                console.log('Coleção do Firestore está vazia. Carregando fallback local...');
+                loadLocalFallbackChannels();
+            }
         }, (err) => {
-            console.error('Erro ao carregar canais:', err);
-            showToast('Erro ao carregar canais', 'error');
+            console.error('Erro Firestore (onSnapshot):', err);
+            loadLocalFallbackChannels();
         });
+}
+
+// ===== LOCAL FALLBACK CHANNELS =====
+async function loadLocalFallbackChannels() {
+    try {
+        console.log('[Fallback] Carregando canais locais a partir de channels.json...');
+        const res = await fetch('channels.json');
+        if (res.ok) {
+            const channels = await res.json();
+            const mapped = channels.map((ch, idx) => ({ id: `fallback-${idx}`, ...ch }));
+            console.log(`[Fallback] ${mapped.length} canais carregados com sucesso.`);
+            globalChannels = mapped;
+            renderChannels(mapped);
+            if (isAdmin) renderAdminChannels(mapped);
+        } else {
+            console.warn('[Fallback] channels.json não foi encontrado.');
+            renderChannels([]);
+        }
+    } catch (err) {
+        console.error('[Fallback] Erro ao carregar canais locais:', err);
+        renderChannels([]);
+    }
 }
 
 // ===== RENDER CHANNELS =====
@@ -144,13 +199,28 @@ function renderAdminChannels(channels) {
 // ===== PLAY CHANNEL =====
 window.playChannel = async function(channelId) {
     try {
-        const doc = await db.collection(CHANNELS_COLLECTION).doc(channelId).get();
-        if (!doc.exists) {
+        let channel;
+        if (channelId.startsWith('fallback-') || !db) {
+            channel = globalChannels.find(c => c.id === channelId);
+        } else {
+            try {
+                const doc = await db.collection(CHANNELS_COLLECTION).doc(channelId).get();
+                if (doc.exists) {
+                    channel = { id: doc.id, ...doc.data() };
+                }
+            } catch (e) {
+                console.warn('[Player] Falha Firestore doc, buscando em cache:', e.message);
+            }
+            if (!channel) {
+                channel = globalChannels.find(c => c.id === channelId);
+            }
+        }
+
+        if (!channel) {
             showToast('Canal não encontrado', 'error');
             return;
         }
 
-        const channel = { id: doc.id, ...doc.data() };
         currentChannel = channel;
 
         // Update UI
@@ -169,6 +239,10 @@ window.playChannel = async function(channelId) {
             card.classList.toggle('active', card.dataset.id === channelId);
         });
 
+        // Clear player options UI
+        playerOptionsContainer.style.display = 'none';
+        optionsButtons.innerHTML = '';
+
         // Estratégia de stream:
         // 1. Se tem streamPageUrl (URL do player do site fonte), usa /stream-proxy para pegar token fresco
         // 2. Se tem url direta (.m3u8), roteia pelo proxy normal
@@ -181,6 +255,8 @@ window.playChannel = async function(channelId) {
         if (streamPageUrl && streamPageUrl.includes('futemais') && proxyUrl) {
             // Usa o stream-proxy que busca token fresco em tempo real
             streamUrl = `${proxyUrl}/stream-proxy?pageUrl=${encodeURIComponent(streamPageUrl)}`;
+            // Fetch alternative options in the background
+            loadAlternativeOptions(streamPageUrl);
         } else if (directUrl && directUrl.includes('.m3u8') && proxyUrl) {
             // URL direta, roteia pelo proxy de CORS
             streamUrl = `${proxyUrl}/proxy?url=${encodeURIComponent(directUrl)}`;
@@ -188,6 +264,7 @@ window.playChannel = async function(channelId) {
             streamUrl = directUrl;
         } else if (streamPageUrl && proxyUrl) {
             streamUrl = `${proxyUrl}/stream-proxy?pageUrl=${encodeURIComponent(streamPageUrl)}`;
+            loadAlternativeOptions(streamPageUrl);
         } else {
             showError('Canal sem URL de stream configurada.');
             return;
@@ -201,6 +278,50 @@ window.playChannel = async function(channelId) {
         showError('Erro ao carregar canal');
     }
 };
+
+// ===== LOAD ALTERNATIVE OPTIONS =====
+async function loadAlternativeOptions(pageUrl) {
+    try {
+        console.log('[Player] Fetching channel options...');
+        const res = await fetch(`${proxyUrl}/api/options?pageUrl=${encodeURIComponent(pageUrl)}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data && data.options && data.options.length > 0) {
+                renderOptionButtons(data.options, pageUrl);
+            }
+        }
+    } catch (err) {
+        console.warn('Erro ao carregar canais alternativos:', err);
+    }
+}
+
+// ===== RENDER OPTION BUTTONS =====
+function renderOptionButtons(options, pageUrl) {
+    optionsButtons.innerHTML = '';
+    
+    options.forEach((opt, idx) => {
+        const btn = document.createElement('button');
+        btn.className = 'option-btn';
+        btn.textContent = opt.label;
+        if (idx === 0) btn.classList.add('active');
+        
+        btn.onclick = () => {
+            document.querySelectorAll('.option-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            playerLoading.style.display = 'flex';
+            playerError.style.display = 'none';
+            
+            const streamUrl = `${proxyUrl}/stream-proxy?pageUrl=${encodeURIComponent(pageUrl)}&optionUrl=${encodeURIComponent(opt.url)}`;
+            console.log('[Player] Loading Option:', opt.label, streamUrl);
+            startStream(streamUrl);
+        };
+        
+        optionsButtons.appendChild(btn);
+    });
+    
+    playerOptionsContainer.style.display = 'flex';
+}
 
 // ===== START STREAM =====
 function startStream(url) {
@@ -355,6 +476,8 @@ function stopPlayback() {
     playerPlaceholder.style.display = 'flex';
     playerLoading.style.display = 'none';
     playerError.style.display = 'none';
+    playerOptionsContainer.style.display = 'none';
+    optionsButtons.innerHTML = '';
     currentChannel = null;
     nowPlaying.textContent = '';
 }

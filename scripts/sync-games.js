@@ -4,6 +4,8 @@
 
 const fetch = require('node-fetch');
 const { parse } = require('node-html-parser');
+const fs = require('fs');
+const path = require('path');
 
 // ===== CONFIG =====
 const FIREBASE_API_KEY = 'AIzaSyAjZwn53tctIJyzd3jsDcLoQQ4l4ptNZHw';
@@ -559,6 +561,15 @@ async function main() {
             } catch (e) {
                 console.warn(`   ❌ Failed: ${game.home} x ${game.away} — ${e.message}`);
             }
+        }
+
+        // Save local fallback JSON file
+        try {
+            const fallbackPath = path.join(__dirname, '../channels.json');
+            fs.writeFileSync(fallbackPath, JSON.stringify(games.map(({ gameId, ...ch }) => ch), null, 2), 'utf8');
+            console.log(`\n💾 Fallback local salvo em: ${fallbackPath}`);
+        } catch (e) {
+            console.warn('\n⚠️ Falha ao salvar fallback local:', e.message);
         }
 
         // === Summary ===
